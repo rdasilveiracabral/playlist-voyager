@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import type { Core, NodeSingular } from 'cytoscape';
-import { ZoomIn, ZoomOut, Maximize2, Info, GitBranch, Clock, ListMusic } from 'lucide-react';
+import { ZoomIn, ZoomOut, Scan, Info, GitBranch, Clock, ListMusic } from 'lucide-react';
 import { getGraphData, getTemporalGraphData, getPlayHistoryGraphData, type GraphData, type GraphNode } from '../lib/api';
 
 type ViewMode = 'artist' | 'playlist' | 'temporal';
@@ -411,7 +411,7 @@ export function StyleGraph() {
             className="p-2 bg-[#1a1a1a] rounded-lg hover:bg-[#282828] transition-colors"
             title="Fit to Screen"
           >
-            <Maximize2 className="w-5 h-5" />
+            <Scan className="w-5 h-5" />
           </button>
         </div>
 

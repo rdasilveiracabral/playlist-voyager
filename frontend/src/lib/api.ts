@@ -219,6 +219,7 @@ export const getPlayHistoryGraphByDate = (date: string) =>
 export interface ActiveEdges {
   active_node_ids: string[];
   active_super_genre_ids: string[];
+  active_edge_pairs: [string, string][];
   play_count: number;
   date: string;
 }

@@ -1062,11 +1062,10 @@ async def get_play_history_graph_by_date(date: str):
 
 @router.get("/graph-data/active-edges-by-date/{date}")
 async def get_active_edges_by_date(date: str):
-    """Get the set of active genre and super-genre node IDs for a specific date.
+    """Get the set of active edges representing sequential genre transitions for a date.
 
-    This is used to highlight nodes/edges in a static full graph when the user
-    selects a date. Returns the IDs of super-genres and genres that were played
-    on the given date.
+    This highlights only the edges that represent actual song-to-song transitions,
+    not all possible edges between genres played that day.
     """
     all_tracks = store.get_all_tracks()
     tracks_by_id = {t.id: t for t in all_tracks}
@@ -1075,41 +1074,92 @@ async def get_active_edges_by_date(date: str):
     # Get all plays and filter to requested date
     all_plays = store.get_all_plays()
     day_plays = [p for p in all_plays if p["played_at"].startswith(date)]
+    day_plays.sort(key=lambda p: p["played_at"])  # Sort chronologically
 
     if not day_plays:
         return {
             "active_node_ids": [],
             "active_super_genre_ids": [],
+            "active_edge_pairs": [],
             "play_count": 0,
             "date": date,
         }
 
-    # Build set of active genres from day's plays
+    # Build track -> genres mapping
+    def get_track_genres(track_id: str) -> tuple[set[str], set[str]]:
+        """Returns (genre_ids, super_genre_ids) for a track"""
+        track = tracks_by_id.get(track_id)
+        if not track:
+            return set(), set()
+
+        genres = set()
+        super_genres = set()
+        for artist_id in track.artist_ids:
+            artist = artists.get(artist_id)
+            if artist:
+                for genre in artist.genres:
+                    sg = get_super_genre([genre])
+                    if genre.lower() != sg.lower():
+                        genres.add(f"genre_{genre}")
+                    super_genres.add(f"super_{sg}")
+        return genres, super_genres
+
+    # Build sequential transitions between adjacent plays
     active_genres: set[str] = set()
     active_super_genres: set[str] = set()
+    active_edge_pairs: set[tuple[str, str]] = set()
+
+    prev_genres: set[str] = set()
+    prev_super_genres: set[str] = set()
 
     for play in day_plays:
         track_id = play.get("track_id")
         if not track_id:
             continue
-        track = tracks_by_id.get(track_id)
-        if not track:
+
+        curr_genres, curr_super_genres = get_track_genres(track_id)
+        if not curr_genres and not curr_super_genres:
             continue
 
-        # Get genres for this track's artists
-        for artist_id in track.artist_ids:
-            artist = artists.get(artist_id)
-            if artist:
-                for genre in artist.genres:
-                    # Skip genres that match their super-genre name
-                    sg = get_super_genre([genre])
-                    if genre.lower() != sg.lower():
-                        active_genres.add(f"genre_{genre}")
-                    active_super_genres.add(f"super_{sg}")
+        # Add current nodes as active
+        active_genres.update(curr_genres)
+        active_super_genres.update(curr_super_genres)
+
+        # Create edges between previous and current track's genres
+        if prev_genres or prev_super_genres:
+            # Genre-to-genre edges (only between different genres)
+            for g1 in prev_genres:
+                for g2 in curr_genres:
+                    if g1 != g2:
+                        # Store as sorted tuple so edge direction doesn't matter
+                        edge = tuple(sorted([g1, g2]))
+                        active_edge_pairs.add(edge)
+
+            # Super-genre-to-super-genre edges (only between different super-genres)
+            for sg1 in prev_super_genres:
+                for sg2 in curr_super_genres:
+                    if sg1 != sg2:
+                        edge = tuple(sorted([sg1, sg2]))
+                        active_edge_pairs.add(edge)
+
+            # Parent edges (genre to its super-genre) for current track
+            for g in curr_genres:
+                # Find the super-genre for this genre
+                genre_name = g.replace("genre_", "")
+                sg = get_super_genre([genre_name])
+                sg_id = f"super_{sg}"
+                if sg_id in curr_super_genres:
+                    edge = tuple(sorted([g, sg_id]))
+                    active_edge_pairs.add(edge)
+
+        # Update previous for next iteration
+        prev_genres = curr_genres
+        prev_super_genres = curr_super_genres
 
     return {
         "active_node_ids": list(active_genres),
         "active_super_genre_ids": list(active_super_genres),
+        "active_edge_pairs": [list(pair) for pair in active_edge_pairs],
         "play_count": len(day_plays),
         "date": date,
     }

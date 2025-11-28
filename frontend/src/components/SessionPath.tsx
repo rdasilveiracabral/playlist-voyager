@@ -10,7 +10,7 @@ import {
   Upload,
   ZoomIn,
   ZoomOut,
-  Maximize2,
+  Scan,
   Calendar as CalendarIcon,
   BarChart3,
   X,
@@ -651,11 +651,22 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
       cy.getElementById(nodeId).addClass('active');
     });
 
-    // Highlight edges where both source and target are active
+    // Build set of active edge pairs (as "node1|node2" strings for fast lookup)
+    const activeEdgePairs = new Set(
+      activeEdges.active_edge_pairs.map((pair) => {
+        const sorted = [...pair].sort();
+        return `${sorted[0]}|${sorted[1]}`;
+      })
+    );
+
+    // Highlight only edges that match the sequential transition pairs
     cy.edges().forEach((edge) => {
       const sourceId = edge.source().id();
       const targetId = edge.target().id();
-      if (activeNodeIds.has(sourceId) && activeNodeIds.has(targetId)) {
+      const sorted = [sourceId, targetId].sort();
+      const edgeKey = `${sorted[0]}|${sorted[1]}`;
+
+      if (activeEdgePairs.has(edgeKey)) {
         edge.addClass('active');
       }
     });
@@ -728,7 +739,7 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
             <ZoomIn className="w-4 h-4" />
           </button>
           <button onClick={handleFit} className="p-1.5 hover:bg-white/10 rounded" title="Fit">
-            <Maximize2 className="w-4 h-4" />
+            <Scan className="w-4 h-4" />
           </button>
         </div>
       </div>
