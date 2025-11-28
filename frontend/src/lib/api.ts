@@ -119,6 +119,40 @@ export interface RecentPlay {
   spotify_url: string;
 }
 
+export interface AllPlay {
+  track_id: string | null;
+  played_at: string;
+  track_name: string;
+  artist_name: string;
+  album_name: string | null;
+  album_image_url: string | null;
+  spotify_url: string | null;
+  ms_played: number | null;
+  source: 'recent' | 'historical';
+}
+
+export interface ListeningStats {
+  daily_counts: Record<string, number>;
+  hourly_pattern: number[];
+  total_plays: number;
+  date_range: {
+    start: string | null;
+    end: string | null;
+  };
+}
+
+export interface HistoryImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+  total_historical: number;
+}
+
+export interface HistoryStats {
+  historical_count: number;
+  recent_count: number;
+}
+
 // ============ API Functions ============
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
@@ -179,3 +213,43 @@ export const classifyMissingGenres = () =>
 export const getGraphData = () => fetchJson<GraphData>('/genres/graph-data');
 export const getTemporalGraphData = () => fetchJson<GraphData>('/genres/graph-data/temporal');
 export const getPlayHistoryGraphData = () => fetchJson<GraphData>('/genres/graph-data/play-history');
+export const getPlayHistoryGraphByDate = (date: string) =>
+  fetchJson<GraphData>(`/genres/graph-data/play-history-by-date/${date}`);
+
+export interface ActiveEdges {
+  active_node_ids: string[];
+  active_super_genre_ids: string[];
+  play_count: number;
+  date: string;
+}
+
+export const getActiveEdgesByDate = (date: string) =>
+  fetchJson<ActiveEdges>(`/genres/graph-data/active-edges-by-date/${date}`);
+
+// Listening Stats
+export const getListeningStats = () => fetchJson<ListeningStats>('/tracks/listening-stats');
+export const getPlaysByDate = (date: string) =>
+  fetchJson<{ plays: AllPlay[]; date: string; count: number }>(`/tracks/plays-by-date/${date}`);
+
+// History Import
+export const getHistoryStats = () => fetchJson<HistoryStats>('/tracks/history-stats');
+export const clearHistory = () => fetchJson<{ status: string }>('/tracks/history', { method: 'DELETE' });
+
+export async function importHistory(files: File[]): Promise<HistoryImportResult> {
+  const formData = new FormData();
+  files.forEach((file) => {
+    formData.append('files', file);
+  });
+
+  const response = await fetch(`${API_BASE}/tracks/import-history`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(error.detail || `HTTP ${response.status}`);
+  }
+
+  return response.json();
+}

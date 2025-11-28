@@ -12,6 +12,7 @@ from typing import Optional
 
 CACHE_DIR = "data"
 CACHE_FILE = os.path.join(CACHE_DIR, "spotify_cache.json")
+HISTORY_FILE = os.path.join(CACHE_DIR, "historical_plays.json")
 
 # Search index for fast lookups
 _search_index: list[tuple[str, str, "Track"]] = []  # (search_text, track_id, track)
@@ -67,6 +68,18 @@ class RecentPlay:
 
 
 @dataclass
+class HistoricalPlay:
+    """Play record from Spotify Extended Streaming History export"""
+    track_id: Optional[str]  # May be None if track was removed from Spotify
+    played_at: str  # ISO timestamp
+    ms_played: int
+    track_name: str
+    artist_name: str
+    album_name: Optional[str] = None
+    skipped: bool = False
+
+
+@dataclass
 class Store:
     """In-memory data store"""
     tracks: dict[str, Track] = field(default_factory=dict)
@@ -97,6 +110,10 @@ class Store:
 
 # Global store instance
 _store: Optional[Store] = None
+
+# Historical plays (kept separate due to potentially large size)
+_historical_plays: list[HistoricalPlay] = []
+_historical_plays_loaded: bool = False
 
 
 def get_store() -> Store:
@@ -369,3 +386,134 @@ def mark_synced():
 def get_last_synced() -> Optional[str]:
     """Get the last sync timestamp"""
     return get_store().last_synced
+
+
+# ============ Historical Plays Operations ============
+
+def load_historical_plays():
+    """Load historical plays from JSON file"""
+    global _historical_plays, _historical_plays_loaded
+    if _historical_plays_loaded:
+        return
+
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r") as f:
+                data = json.load(f)
+            _historical_plays = [HistoricalPlay(**p) for p in data]
+            print(f"Loaded historical plays: {len(_historical_plays)} entries")
+        except Exception as e:
+            print(f"Failed to load historical plays: {e}")
+            _historical_plays = []
+
+    _historical_plays_loaded = True
+
+
+def save_historical_plays():
+    """Save historical plays to JSON file"""
+    global _historical_plays
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(HISTORY_FILE, "w") as f:
+        json.dump([asdict(p) for p in _historical_plays], f)
+    print(f"Saved historical plays: {len(_historical_plays)} entries")
+
+
+def add_historical_play(play_data: dict) -> HistoricalPlay:
+    """Add a historical play record (from import)"""
+    global _historical_plays
+    load_historical_plays()
+
+    play = HistoricalPlay(
+        track_id=play_data.get("track_id"),
+        played_at=play_data["played_at"],
+        ms_played=play_data.get("ms_played", 0),
+        track_name=play_data.get("track_name", ""),
+        artist_name=play_data.get("artist_name", ""),
+        album_name=play_data.get("album_name"),
+        skipped=play_data.get("skipped", False),
+    )
+
+    # Avoid duplicates by checking track_name + played_at
+    existing = [
+        p for p in _historical_plays
+        if p.track_name == play.track_name and p.played_at == play.played_at
+    ]
+    if not existing:
+        _historical_plays.append(play)
+
+    return play
+
+
+def get_historical_plays() -> list[HistoricalPlay]:
+    """Get all historical plays"""
+    load_historical_plays()
+    return _historical_plays
+
+
+def get_historical_play_count() -> int:
+    """Get count of historical plays"""
+    load_historical_plays()
+    return len(_historical_plays)
+
+
+def clear_historical_plays():
+    """Clear all historical plays"""
+    global _historical_plays
+    _historical_plays = []
+    if os.path.exists(HISTORY_FILE):
+        os.remove(HISTORY_FILE)
+
+
+def get_all_plays(limit: Optional[int] = None) -> list[dict]:
+    """Get all plays (recent + historical) sorted by timestamp, newest first"""
+    store = get_store()
+    load_historical_plays()
+
+    all_plays = []
+
+    # Add recent plays
+    for play in store.recent_plays:
+        track = store.tracks.get(play.track_id)
+        all_plays.append({
+            "track_id": play.track_id,
+            "played_at": play.played_at,
+            "track_name": track.name if track else "Unknown",
+            "artist_name": ", ".join(track.artist_names) if track else "Unknown",
+            "album_name": track.album_name if track else None,
+            "album_image_url": track.album_image_url if track else None,
+            "spotify_url": track.spotify_url if track else None,
+            "ms_played": None,
+            "source": "recent",
+        })
+
+    # Add historical plays
+    for play in _historical_plays:
+        # Try to get album art from tracks if we have the track_id
+        track = store.tracks.get(play.track_id) if play.track_id else None
+        all_plays.append({
+            "track_id": play.track_id,
+            "played_at": play.played_at,
+            "track_name": play.track_name,
+            "artist_name": play.artist_name,
+            "album_name": play.album_name,
+            "album_image_url": track.album_image_url if track else None,
+            "spotify_url": f"https://open.spotify.com/track/{play.track_id}" if play.track_id else None,
+            "ms_played": play.ms_played,
+            "source": "historical",
+        })
+
+    # Sort by played_at descending and deduplicate
+    all_plays.sort(key=lambda p: p["played_at"], reverse=True)
+
+    # Deduplicate by track_name + played_at (in case same play in both sources)
+    seen = set()
+    unique_plays = []
+    for play in all_plays:
+        key = (play["track_name"], play["played_at"][:16])  # Truncate to minute
+        if key not in seen:
+            seen.add(key)
+            unique_plays.append(play)
+
+    if limit:
+        return unique_plays[:limit]
+    return unique_plays

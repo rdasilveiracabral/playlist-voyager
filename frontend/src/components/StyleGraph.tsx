@@ -45,6 +45,18 @@ export function StyleGraph() {
   useEffect(() => {
     if (!containerRef.current || !graphData) return;
 
+    // Calculate dynamic ranges based on actual data
+    const superGenreNodes = graphData.nodes.filter(n => n.data.type === 'super_genre');
+    const genreNodes = graphData.nodes.filter(n => n.data.type === 'genre');
+
+    const superGenreCounts = superGenreNodes.map(n => n.data.count);
+    const genreCounts = genreNodes.map(n => n.data.count);
+
+    const superMin = Math.min(...superGenreCounts, 1);
+    const superMax = Math.max(...superGenreCounts, 1);
+    const genreMin = Math.min(...genreCounts, 1);
+    const genreMax = Math.max(...genreCounts, 1);
+
     const cy = cytoscape({
       container: containerRef.current,
       elements: [...graphData.nodes, ...graphData.edges],
@@ -55,8 +67,8 @@ export function StyleGraph() {
           style: {
             'background-color': 'data(color)',
             'label': 'data(label)',
-            'width': 'mapData(count, 0, 5000, 80, 200)',
-            'height': 'mapData(count, 0, 5000, 80, 200)',
+            'width': `mapData(count, ${superMin}, ${superMax}, 80, 200)`,
+            'height': `mapData(count, ${superMin}, ${superMax}, 80, 200)`,
             'font-size': '16px',
             'font-weight': 'bold',
             'color': '#ffffff',
@@ -78,8 +90,8 @@ export function StyleGraph() {
             'background-color': 'data(color)',
             'background-opacity': 0.8,
             'label': 'data(label)',
-            'width': 'mapData(count, 1, 600, 15, 60)',
-            'height': 'mapData(count, 1, 600, 15, 60)',
+            'width': `mapData(count, ${genreMin}, ${genreMax}, 15, 60)`,
+            'height': `mapData(count, ${genreMin}, ${genreMax}, 15, 60)`,
             'font-size': '9px',
             'color': '#ffffff',
             'text-valign': 'bottom',
@@ -414,10 +426,10 @@ export function StyleGraph() {
                   ? 'bg-[#1DB954] text-black font-semibold'
                   : 'text-gray-400 hover:text-white hover:bg-white/10'
               }`}
-              title="Genres connected by shared artists"
+              title="Genres that appear together on the same track"
             >
               <GitBranch className="w-3.5 h-3.5" />
-              Artist
+              Track
             </button>
             <button
               onClick={() => setViewMode('playlist')}

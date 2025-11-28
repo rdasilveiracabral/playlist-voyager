@@ -10,8 +10,8 @@ type TabId = 'splash' | 'search' | 'graph' | 'session';
 
 const TABS: { id: TabId; label: string; icon: typeof Clock }[] = [
   { id: 'search', label: 'Temporal Search', icon: Clock },
-  { id: 'graph', label: 'Style Graph', icon: GitBranch },
-  { id: 'session', label: 'Session Path', icon: Play },
+  { id: 'graph', label: 'Affinities Graph', icon: GitBranch },
+  { id: 'session', label: 'Listening Sessions', icon: Play },
 ];
 
 // Persist tab selection in localStorage

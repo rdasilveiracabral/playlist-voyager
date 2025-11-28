@@ -264,28 +264,35 @@ async def get_graph_data():
                     "spotify_url": track.spotify_url,
                 })
 
-    # Build genre co-occurrence from artists (genres that appear together on same artist)
+    # Build genre co-occurrence from tracks (genres that appear together on same track)
+    # Note: Spotify provides genres at the artist level, not track level.
+    # So a track's genres = union of all its artists' genres.
     genre_cooccurrence: dict[tuple[str, str], int] = {}
-    for artist in artists.values():
-        if len(artist.genres) >= 2:
-            # Create edges between all pairs of genres on this artist
-            genres_list = list(artist.genres)
+    super_genre_connections: dict[tuple[str, str], int] = {}
+
+    for track in tracks:
+        # Get all genres for this track's artists
+        track_genres = set()
+        for artist_id in track.artist_ids:
+            artist = artists.get(artist_id)
+            if artist:
+                track_genres.update(artist.genres)
+
+        # Build co-occurrence edges between genres on this track
+        if len(track_genres) >= 2:
+            genres_list = list(track_genres)
             for i in range(len(genres_list)):
                 for j in range(i + 1, len(genres_list)):
                     g1, g2 = genres_list[i], genres_list[j]
-                    # Only include genres that are in our data
                     if g1 in genre_data and g2 in genre_data:
                         key = tuple(sorted([g1, g2]))
                         genre_cooccurrence[key] = genre_cooccurrence.get(key, 0) + 1
 
-    # Build super-genre connections from artists spanning multiple super-genres
-    super_genre_connections: dict[tuple[str, str], int] = {}
-    for artist in artists.values():
-        if artist.genres:
-            # Get unique super-genres for this artist
-            artist_super_genres = set(get_super_genre([g]) for g in artist.genres)
-            if len(artist_super_genres) >= 2:
-                sg_list = list(artist_super_genres)
+        # Build super-genre connections from tracks spanning multiple super-genres
+        if track_genres:
+            track_super_genres = set(get_super_genre([g]) for g in track_genres)
+            if len(track_super_genres) >= 2:
+                sg_list = list(track_super_genres)
                 for i in range(len(sg_list)):
                     for j in range(i + 1, len(sg_list)):
                         key = tuple(sorted([sg_list[i], sg_list[j]]))
@@ -826,4 +833,283 @@ async def get_play_history_graph_data():
             "genre_connections": len([e for e in edges if e["data"].get("type") == "temporal"]),
             "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "temporal_bridge"]),
         },
+    }
+
+
+@router.get("/graph-data/play-history-by-date/{date}")
+async def get_play_history_graph_by_date(date: str):
+    """Get graph data for a specific date's listening session.
+
+    Shows genre connections based on what was played on that date.
+    """
+    all_tracks = store.get_all_tracks()
+    tracks_by_id = {t.id: t for t in all_tracks}
+    artists = {a.id: a for a in store.get_all_artists()}
+
+    # Get all plays and filter to requested date
+    all_plays = store.get_all_plays()
+    day_plays = [p for p in all_plays if p["played_at"].startswith(date)]
+    day_plays.sort(key=lambda p: p["played_at"])  # Sort chronologically
+
+    if not day_plays:
+        # Return empty graph if no plays on this date
+        return {
+            "nodes": [],
+            "edges": [],
+            "stats": {
+                "total_genres": 0,
+                "total_tracks": 0,
+                "genre_connections": 0,
+                "super_genre_bridges": 0,
+                "date": date,
+            },
+        }
+
+    # Build track -> genres mapping for played tracks
+    track_genres: dict[str, set[str]] = {}
+    for play in day_plays:
+        track_id = play.get("track_id")
+        if not track_id:
+            continue
+        track = tracks_by_id.get(track_id)
+        if not track:
+            # For historical plays without track in library, use "unknown"
+            track_genres[track_id] = {"unknown"}
+            continue
+        genres = set()
+        for artist_id in track.artist_ids:
+            artist = artists.get(artist_id)
+            if artist:
+                genres.update(artist.genres)
+        if not genres:
+            genres = {"unknown"}
+        track_genres[track_id] = genres
+
+    # Count plays per genre and collect sample tracks
+    genre_data = {}
+    for play in day_plays:
+        track_id = play.get("track_id")
+        if not track_id or track_id not in track_genres:
+            continue
+        track = tracks_by_id.get(track_id)
+        for genre in track_genres[track_id]:
+            if genre not in genre_data:
+                genre_data[genre] = {
+                    "count": 0,
+                    "super_genre": get_super_genre([genre]),
+                    "sample_tracks": [],
+                }
+            genre_data[genre]["count"] += 1
+            if len(genre_data[genre]["sample_tracks"]) < 10 and track:
+                existing_ids = [t["id"] for t in genre_data[genre]["sample_tracks"]]
+                if track.id not in existing_ids:
+                    genre_data[genre]["sample_tracks"].append({
+                        "id": track.id,
+                        "name": track.name,
+                        "artists": track.artist_names,
+                        "album_image": track.album_image_url,
+                        "spotify_url": track.spotify_url,
+                    })
+
+    # Build temporal affinity from the day's play sequence
+    # Use smaller window since we're looking at a single day
+    window_size = 5
+    play_affinity: dict[tuple[str, str], float] = {}
+    play_super_affinity: dict[tuple[str, str], float] = {}
+
+    for i, play in enumerate(day_plays):
+        track_id = play.get("track_id")
+        if not track_id or track_id not in track_genres:
+            continue
+        play_g = track_genres[track_id]
+
+        for offset in range(-window_size, window_size + 1):
+            if offset == 0:
+                continue
+
+            neighbor_idx = i + offset
+            if 0 <= neighbor_idx < len(day_plays):
+                neighbor_play = day_plays[neighbor_idx]
+                neighbor_id = neighbor_play.get("track_id")
+                if not neighbor_id or neighbor_id not in track_genres:
+                    continue
+                neighbor_g = track_genres[neighbor_id]
+
+                weight = gaussian_weight(abs(offset), sigma=3.0)
+
+                for g1 in play_g:
+                    for g2 in neighbor_g:
+                        if g1 != g2 and g1 in genre_data and g2 in genre_data:
+                            key = tuple(sorted([g1, g2]))
+                            play_affinity[key] = play_affinity.get(key, 0) + weight
+
+                sg1_set = set(get_super_genre([g]) for g in play_g)
+                sg2_set = set(get_super_genre([g]) for g in neighbor_g)
+                for sg1 in sg1_set:
+                    for sg2 in sg2_set:
+                        if sg1 != sg2:
+                            key = tuple(sorted([sg1, sg2]))
+                            play_super_affinity[key] = play_super_affinity.get(key, 0) + weight
+
+    # Build Cytoscape nodes
+    nodes = []
+
+    super_genre_counts = {}
+    super_genre_samples: dict[str, list] = {}
+    for genre, data in genre_data.items():
+        sg = data["super_genre"]
+        super_genre_counts[sg] = super_genre_counts.get(sg, 0) + data["count"]
+        if sg not in super_genre_samples:
+            super_genre_samples[sg] = []
+        if len(super_genre_samples[sg]) < 10:
+            for track in data["sample_tracks"]:
+                if len(super_genre_samples[sg]) < 10:
+                    super_genre_samples[sg].append(track)
+
+    for super_genre, count in super_genre_counts.items():
+        if count > 0:
+            nodes.append({
+                "data": {
+                    "id": f"super_{super_genre}",
+                    "label": super_genre.replace("-", " ").title(),
+                    "type": "super_genre",
+                    "color": GENRE_COLORS.get(super_genre, "#9E9E9E"),
+                    "count": count,
+                    "sample_tracks": super_genre_samples.get(super_genre, []),
+                }
+            })
+
+    for genre, data in genre_data.items():
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
+            nodes.append({
+                "data": {
+                    "id": f"genre_{genre}",
+                    "label": genre,
+                    "type": "genre",
+                    "parent_id": f"super_{data['super_genre']}",
+                    "color": GENRE_COLORS.get(data["super_genre"], "#9E9E9E"),
+                    "count": data["count"],
+                    "sample_tracks": data["sample_tracks"],
+                }
+            })
+
+    # Build edges
+    edges = []
+
+    # Parent edges
+    for genre, data in genre_data.items():
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
+            edges.append({
+                "data": {
+                    "id": f"edge_{genre}_{data['super_genre']}",
+                    "source": f"genre_{genre}",
+                    "target": f"super_{data['super_genre']}",
+                    "type": "parent",
+                }
+            })
+
+    # Play affinity edges
+    if play_affinity:
+        max_weight = max(play_affinity.values())
+        min_threshold = max_weight * 0.1  # Higher threshold for single day
+
+        for (g1, g2), weight in play_affinity.items():
+            if weight >= min_threshold:
+                g1_super = genre_data[g1]["super_genre"]
+                g2_super = genre_data[g2]["super_genre"]
+                if g1.lower() == g1_super.lower() or g2.lower() == g2_super.lower():
+                    continue
+                normalized_weight = (weight / max_weight) * 20
+                edges.append({
+                    "data": {
+                        "id": f"edge_play_{g1}_{g2}",
+                        "source": f"genre_{g1}",
+                        "target": f"genre_{g2}",
+                        "type": "temporal",
+                        "weight": round(normalized_weight, 2),
+                    }
+                })
+
+    if play_super_affinity:
+        max_sg_weight = max(play_super_affinity.values())
+        min_sg_threshold = max_sg_weight * 0.15
+
+        for (sg1, sg2), weight in play_super_affinity.items():
+            if weight >= min_sg_threshold:
+                normalized_weight = (weight / max_sg_weight) * 50
+                edges.append({
+                    "data": {
+                        "id": f"edge_play_super_{sg1}_{sg2}",
+                        "source": f"super_{sg1}",
+                        "target": f"super_{sg2}",
+                        "type": "temporal_bridge",
+                        "weight": round(normalized_weight, 2),
+                    }
+                })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_genres": len(genre_data),
+            "total_tracks": len(day_plays),
+            "genre_connections": len([e for e in edges if e["data"].get("type") == "temporal"]),
+            "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "temporal_bridge"]),
+            "date": date,
+        },
+    }
+
+
+@router.get("/graph-data/active-edges-by-date/{date}")
+async def get_active_edges_by_date(date: str):
+    """Get the set of active genre and super-genre node IDs for a specific date.
+
+    This is used to highlight nodes/edges in a static full graph when the user
+    selects a date. Returns the IDs of super-genres and genres that were played
+    on the given date.
+    """
+    all_tracks = store.get_all_tracks()
+    tracks_by_id = {t.id: t for t in all_tracks}
+    artists = {a.id: a for a in store.get_all_artists()}
+
+    # Get all plays and filter to requested date
+    all_plays = store.get_all_plays()
+    day_plays = [p for p in all_plays if p["played_at"].startswith(date)]
+
+    if not day_plays:
+        return {
+            "active_node_ids": [],
+            "active_super_genre_ids": [],
+            "play_count": 0,
+            "date": date,
+        }
+
+    # Build set of active genres from day's plays
+    active_genres: set[str] = set()
+    active_super_genres: set[str] = set()
+
+    for play in day_plays:
+        track_id = play.get("track_id")
+        if not track_id:
+            continue
+        track = tracks_by_id.get(track_id)
+        if not track:
+            continue
+
+        # Get genres for this track's artists
+        for artist_id in track.artist_ids:
+            artist = artists.get(artist_id)
+            if artist:
+                for genre in artist.genres:
+                    # Skip genres that match their super-genre name
+                    sg = get_super_genre([genre])
+                    if genre.lower() != sg.lower():
+                        active_genres.add(f"genre_{genre}")
+                    active_super_genres.add(f"super_{sg}")
+
+    return {
+        "active_node_ids": list(active_genres),
+        "active_super_genre_ids": list(active_super_genres),
+        "play_count": len(day_plays),
+        "date": date,
     }

@@ -1,8 +1,10 @@
 """
 Track-related API endpoints
 """
+import json
 from dataclasses import asdict
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import List
+from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel
 import store
 import spotify_client as spotify
@@ -88,6 +90,130 @@ async def get_recent_plays(limit: int = 50):
     # Then return from cache
     plays = store.get_recent_plays(limit)
     return {"plays": plays}
+
+
+@router.get("/listening-stats")
+async def get_listening_stats():
+    """Get listening statistics for calendar and hourly patterns"""
+    # Get all plays (recent + historical)
+    plays = store.get_all_plays()
+
+    # Group by date for calendar
+    daily_counts: dict[str, int] = {}
+
+    # Group by hour for pattern
+    hourly_pattern = [0] * 24
+
+    for play in plays:
+        played_at = play["played_at"]
+        date = played_at[:10]  # YYYY-MM-DD
+        try:
+            hour = int(played_at[11:13])  # HH
+        except (ValueError, IndexError):
+            hour = 0
+
+        daily_counts[date] = daily_counts.get(date, 0) + 1
+        hourly_pattern[hour] += 1
+
+    return {
+        "daily_counts": daily_counts,
+        "hourly_pattern": hourly_pattern,
+        "total_plays": len(plays),
+        "date_range": {
+            "start": min(daily_counts.keys()) if daily_counts else None,
+            "end": max(daily_counts.keys()) if daily_counts else None,
+        },
+    }
+
+
+@router.get("/plays-by-date/{date}")
+async def get_plays_by_date(date: str):
+    """Get plays for a specific date (YYYY-MM-DD)"""
+    plays = store.get_all_plays()
+    filtered = [p for p in plays if p["played_at"].startswith(date)]
+    # Sort by time within the day
+    filtered.sort(key=lambda p: p["played_at"])
+    return {"plays": filtered, "date": date, "count": len(filtered)}
+
+
+@router.post("/import-history")
+async def import_streaming_history(files: List[UploadFile] = File(...)):
+    """Import Spotify Extended Streaming History JSON files"""
+    imported = 0
+    skipped = 0
+    errors = []
+
+    for file in files:
+        try:
+            content = await file.read()
+            data = json.loads(content)
+
+            for entry in data:
+                # Skip very short plays (< 30 seconds) - likely skips
+                ms_played = entry.get("ms_played", 0)
+                if ms_played < 30000:
+                    skipped += 1
+                    continue
+
+                # Extract track_id from URI if available
+                uri = entry.get("spotify_track_uri", "")
+                track_id = uri.split(":")[-1] if uri and ":" in uri else None
+
+                # Get timestamp - Spotify uses "ts" field
+                played_at = entry.get("ts", "")
+                if not played_at:
+                    skipped += 1
+                    continue
+
+                play = {
+                    "track_id": track_id,
+                    "played_at": played_at,
+                    "ms_played": ms_played,
+                    "track_name": entry.get("master_metadata_track_name", ""),
+                    "artist_name": entry.get("master_metadata_album_artist_name", ""),
+                    "album_name": entry.get("master_metadata_album_album_name"),
+                    "skipped": entry.get("skipped", False),
+                }
+
+                # Skip entries without track name
+                if not play["track_name"]:
+                    skipped += 1
+                    continue
+
+                store.add_historical_play(play)
+                imported += 1
+
+        except json.JSONDecodeError as e:
+            errors.append(f"{file.filename}: Invalid JSON - {str(e)}")
+        except Exception as e:
+            errors.append(f"{file.filename}: {str(e)}")
+
+    # Save after all files processed
+    if imported > 0:
+        store.save_historical_plays()
+
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "errors": errors,
+        "total_historical": store.get_historical_play_count(),
+    }
+
+
+@router.get("/history-stats")
+async def get_history_stats():
+    """Get statistics about imported historical data"""
+    return {
+        "historical_count": store.get_historical_play_count(),
+        "recent_count": len(store.get_store().recent_plays),
+    }
+
+
+@router.delete("/history")
+async def clear_history():
+    """Clear all imported historical data"""
+    store.clear_historical_plays()
+    return {"status": "cleared"}
 
 
 def update_sync_progress(progress: int, total: int, stage: str = ""):
