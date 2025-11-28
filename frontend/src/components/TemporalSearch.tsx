@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Search, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Clock, ChevronLeft, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { searchTracks, getTemporalNeighbors, type Track, type TemporalNeighbors } from '../lib/api';
 import { TrackCard } from './TrackCard';
 
@@ -10,6 +10,8 @@ export function TemporalSearch() {
   const [neighbors, setNeighbors] = useState<TemporalNeighbors | null>(null);
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [neighborCount, setNeighborCount] = useState(5);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   // Debounced search
   useEffect(() => {
@@ -38,6 +40,7 @@ export function TemporalSearch() {
     setSearchResults([]);
     setQuery('');
     setLoading(true);
+    setNeighborCount(5);
 
     try {
       const result = await getTemporalNeighbors(track.id, 5);
@@ -48,6 +51,23 @@ export function TemporalSearch() {
       setLoading(false);
     }
   }, []);
+
+  const handleLoadMore = useCallback(async () => {
+    if (!selectedTrack) return;
+
+    setLoadingMore(true);
+    const newCount = neighborCount + 5;
+
+    try {
+      const result = await getTemporalNeighbors(selectedTrack.id, newCount);
+      setNeighbors(result);
+      setNeighborCount(newCount);
+    } catch (err) {
+      console.error('Failed to load more:', err);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [selectedTrack, neighborCount]);
 
   return (
     <div className="h-full flex flex-col">
@@ -122,9 +142,25 @@ export function TemporalSearch() {
             <div>
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
                 <ChevronLeft className="w-4 h-4" />
-                Saved Before
+                Saved Before ({neighbors.before.length})
               </h3>
               <div className="space-y-2">
+                {neighbors.before.length > 0 && neighbors.before.length === neighborCount && (
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="w-full py-2 mb-2 text-sm text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                  >
+                    {loadingMore ? (
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <ChevronUp className="w-4 h-4" />
+                        Load earlier tracks
+                      </>
+                    )}
+                  </button>
+                )}
                 {neighbors.before.map((track) => (
                   <TrackCard
                     key={track.id}
@@ -157,7 +193,7 @@ export function TemporalSearch() {
             {/* After */}
             <div>
               <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3 flex items-center gap-2">
-                Saved After
+                Saved After ({neighbors.after.length})
                 <ChevronRight className="w-4 h-4" />
               </h3>
               <div className="space-y-2">
@@ -171,6 +207,22 @@ export function TemporalSearch() {
                 ))}
                 {neighbors.after.length === 0 && (
                   <p className="text-gray-500 text-sm italic">No tracks saved after this one</p>
+                )}
+                {neighbors.after.length > 0 && neighbors.after.length === neighborCount && (
+                  <button
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="w-full py-2 mt-2 text-sm text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors flex items-center justify-center gap-2"
+                  >
+                    {loadingMore ? (
+                      <div className="w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <ChevronDown className="w-4 h-4" />
+                        Load later tracks
+                      </>
+                    )}
+                  </button>
                 )}
               </div>
             </div>

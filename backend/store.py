@@ -13,6 +13,9 @@ from typing import Optional
 CACHE_DIR = "data"
 CACHE_FILE = os.path.join(CACHE_DIR, "spotify_cache.json")
 
+# Search index for fast lookups
+_search_index: list[tuple[str, str, "Track"]] = []  # (search_text, track_id, track)
+
 
 @dataclass
 class Track:
@@ -162,16 +165,35 @@ def get_all_tracks() -> list[Track]:
     return sorted(store.tracks.values(), key=lambda t: t.added_at, reverse=True)
 
 
-def search_tracks(query: str, limit: int = 20) -> list[Track]:
-    """Search tracks by name (case-insensitive)"""
-    query_lower = query.lower()
+def build_search_index():
+    """Build search index for fast lookups. Call after sync or load."""
+    global _search_index
     store = get_store()
+    _search_index = []
+
+    for track in store.tracks.values():
+        # Combine track name and artist names for searchability
+        search_text = f"{track.name} {' '.join(track.artist_names)}".lower()
+        _search_index.append((search_text, track.id, track))
+
+    # Pre-sort by popularity for consistent results
+    _search_index.sort(key=lambda x: x[2].popularity, reverse=True)
+    print(f"Built search index: {len(_search_index)} tracks")
+
+
+def search_tracks(query: str, limit: int = 20) -> list[Track]:
+    """Search tracks by name or artist (case-insensitive)"""
+    global _search_index
+
+    # Build index if not yet built
+    if not _search_index:
+        build_search_index()
+
+    query_lower = query.lower()
     matches = [
-        t for t in store.tracks.values()
-        if query_lower in t.name.lower()
+        track for search_text, track_id, track in _search_index
+        if query_lower in search_text
     ]
-    # Sort by popularity, then limit
-    matches.sort(key=lambda t: t.popularity, reverse=True)
     return matches[:limit]
 
 
@@ -336,10 +358,12 @@ def get_recent_plays(limit: int = 50) -> list[dict]:
 
 
 def mark_synced():
-    """Mark the store as synced"""
+    """Mark the store as synced and rebuild search index"""
     store = get_store()
     store.last_synced = datetime.utcnow().isoformat()
     save_store()
+    # Rebuild search index after sync completes
+    build_search_index()
 
 
 def get_last_synced() -> Optional[str]:
