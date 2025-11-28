@@ -54,23 +54,24 @@ def get_super_genre(genres: list[str]) -> str:
     return "other"
 
 
-# Color palette for super-genres (vibrant, music-app feel)
+# Color palette for super-genres - refined for dark backgrounds
+# Using slightly muted, harmonious colors that work well together
 GENRE_COLORS = {
-    "rock": "#E53935",      # Red
-    "electronic": "#00BCD4", # Cyan
-    "hip-hop": "#FF9800",    # Orange
-    "pop": "#E91E63",        # Pink
-    "r&b": "#9C27B0",        # Purple
-    "jazz": "#3F51B5",       # Indigo
-    "classical": "#607D8B",  # Blue-grey
-    "country": "#8D6E63",    # Brown
-    "latin": "#FFEB3B",      # Yellow
-    "metal": "#212121",      # Near-black
-    "world": "#4CAF50",      # Green
-    "blues": "#2196F3",      # Blue
-    "folk": "#795548",       # Brown
-    "punk": "#FF5722",       # Deep orange
-    "other": "#9E9E9E",      # Grey
+    "rock": "#e74c3c",       # Warm red
+    "electronic": "#3498db", # Sky blue
+    "hip-hop": "#f39c12",    # Amber/gold
+    "pop": "#e91e9d",        # Magenta/pink
+    "r&b": "#9b59b6",        # Amethyst purple
+    "jazz": "#1abc9c",       # Teal
+    "classical": "#bdc3c7",  # Silver
+    "country": "#d35400",    # Burnt orange
+    "latin": "#f1c40f",      # Sunflower yellow
+    "metal": "#7f8c8d",      # Steel gray
+    "world": "#27ae60",      # Emerald green
+    "blues": "#2980b9",      # Deep blue
+    "folk": "#a0522d",       # Sienna
+    "punk": "#c0392b",       # Dark red
+    "other": "#6c7a89",      # Slate gray
 }
 
 
@@ -263,6 +264,33 @@ async def get_graph_data():
                     "spotify_url": track.spotify_url,
                 })
 
+    # Build genre co-occurrence from artists (genres that appear together on same artist)
+    genre_cooccurrence: dict[tuple[str, str], int] = {}
+    for artist in artists.values():
+        if len(artist.genres) >= 2:
+            # Create edges between all pairs of genres on this artist
+            genres_list = list(artist.genres)
+            for i in range(len(genres_list)):
+                for j in range(i + 1, len(genres_list)):
+                    g1, g2 = genres_list[i], genres_list[j]
+                    # Only include genres that are in our data
+                    if g1 in genre_data and g2 in genre_data:
+                        key = tuple(sorted([g1, g2]))
+                        genre_cooccurrence[key] = genre_cooccurrence.get(key, 0) + 1
+
+    # Build super-genre connections from artists spanning multiple super-genres
+    super_genre_connections: dict[tuple[str, str], int] = {}
+    for artist in artists.values():
+        if artist.genres:
+            # Get unique super-genres for this artist
+            artist_super_genres = set(get_super_genre([g]) for g in artist.genres)
+            if len(artist_super_genres) >= 2:
+                sg_list = list(artist_super_genres)
+                for i in range(len(sg_list)):
+                    for j in range(i + 1, len(sg_list)):
+                        key = tuple(sorted([sg_list[i], sg_list[j]]))
+                        super_genre_connections[key] = super_genre_connections.get(key, 0) + 1
+
     # Build Cytoscape nodes
     nodes = []
 
@@ -299,8 +327,10 @@ async def get_graph_data():
                 }
             })
 
-    # Build edges (genre -> super-genre)
+    # Build edges
     edges = []
+
+    # 1. Genre -> super-genre edges (parent relationship)
     for genre, data in genre_data.items():
         if data["count"] > 0:
             edges.append({
@@ -308,6 +338,35 @@ async def get_graph_data():
                     "id": f"edge_{genre}_{data['super_genre']}",
                     "source": f"genre_{genre}",
                     "target": f"super_{data['super_genre']}",
+                    "type": "parent",
+                }
+            })
+
+    # 2. Genre <-> genre edges (co-occurrence on same artist)
+    # Only include edges with weight >= 2 to reduce clutter
+    for (g1, g2), weight in genre_cooccurrence.items():
+        if weight >= 2:
+            edges.append({
+                "data": {
+                    "id": f"edge_cooccur_{g1}_{g2}",
+                    "source": f"genre_{g1}",
+                    "target": f"genre_{g2}",
+                    "type": "cooccurrence",
+                    "weight": weight,
+                }
+            })
+
+    # 3. Super-genre <-> super-genre edges (artists spanning categories)
+    # Only include if at least 3 artists bridge these super-genres
+    for (sg1, sg2), weight in super_genre_connections.items():
+        if weight >= 3:
+            edges.append({
+                "data": {
+                    "id": f"edge_super_{sg1}_{sg2}",
+                    "source": f"super_{sg1}",
+                    "target": f"super_{sg2}",
+                    "type": "bridge",
+                    "weight": weight,
                 }
             })
 
@@ -317,5 +376,7 @@ async def get_graph_data():
         "stats": {
             "total_genres": len(genre_data),
             "total_tracks": len(tracks),
+            "genre_connections": len([e for e in edges if e["data"].get("type") == "cooccurrence"]),
+            "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "bridge"]),
         },
     }

@@ -6,13 +6,129 @@ import { StyleGraph } from './components/StyleGraph';
 import { SessionPath } from './components/SessionPath';
 import './index.css';
 
-type TabId = 'search' | 'graph' | 'session';
+type TabId = 'splash' | 'search' | 'graph' | 'session';
 
 const TABS: { id: TabId; label: string; icon: typeof Clock }[] = [
   { id: 'search', label: 'Temporal Search', icon: Clock },
   { id: 'graph', label: 'Style Graph', icon: GitBranch },
   { id: 'session', label: 'Session Path', icon: Play },
 ];
+
+// Persist tab selection in localStorage
+const getInitialTab = (): TabId => {
+  const saved = localStorage.getItem('playlist-voyager-tab');
+  if (saved && ['splash', 'search', 'graph', 'session'].includes(saved)) {
+    return saved as TabId;
+  }
+  return 'splash';
+};
+
+function SplashScreen({ onNavigate }: { onNavigate: (tab: TabId) => void }) {
+  return (
+    <div className="h-full overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-6 py-12">
+        {/* Hero */}
+        <div className="text-center mb-12">
+          <img
+            src="/logo_big.png"
+            alt="Playlist Voyager"
+            className="w-80 mx-auto mb-6"
+          />
+          <p className="text-xl text-gray-400">
+            A visual explorer for your Spotify Liked Songs library.
+          </p>
+        </div>
+
+        {/* The Problem */}
+        <div className="mb-12">
+          <h2 className="text-2xl font-bold mb-4 text-[#1DB954]">The Problem</h2>
+          <p className="text-gray-300 leading-relaxed mb-4">
+            If you're like me, your Spotify Liked Songs playlist has grown into a massive collection over the years.
+            I use it on shuffle to find and settle on a mood for the day, since my taste is pretty eclectic.
+          </p>
+          <p className="text-gray-300 leading-relaxed mb-4">
+            But here's the thing: <strong className="text-white">my song-saving pattern is bursty</strong>.
+            When I discover a new style or artist, I tend to save multiple songs in quick succession.
+            This means my Liked Songs are <em>temporally consistent</em>—songs saved around the same time often share a vibe.
+          </p>
+          <p className="text-gray-300 leading-relaxed">
+            <strong className="text-white">The frustration?</strong> When I find a song I love and want to hear what I saved around it, Spotify won't cooperate.
+            Creating a "radio" from a song gets close, but it pulls from all of Spotify, not <em>my</em> library.
+          </p>
+        </div>
+
+        {/* Features */}
+        <div className="grid gap-6">
+          <button
+            onClick={() => onNavigate('search')}
+            className="bg-[#141414] hover:bg-[#1a1a1a] border border-white/10 hover:border-[#1DB954]/50 rounded-2xl p-6 text-left transition-all group"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-[#1DB954]/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[#1DB954]/30 transition-colors">
+                <Clock className="w-6 h-6 text-[#1DB954]" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold mb-2 group-hover:text-[#1DB954] transition-colors">
+                  Temporal Search
+                </h3>
+                <p className="text-gray-400 text-sm">
+                  Find songs saved around the same time as any track in your library.
+                  Perfect for rediscovering those "music moods" when you saved multiple songs in the same style.
+                </p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onNavigate('graph')}
+            className="bg-[#141414] hover:bg-[#1a1a1a] border border-white/10 hover:border-[#1DB954]/50 rounded-2xl p-6 text-left transition-all group"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-[#1DB954]/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[#1DB954]/30 transition-colors">
+                <GitBranch className="w-6 h-6 text-[#1DB954]" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold mb-2 group-hover:text-[#1DB954] transition-colors">
+                  Style Graph
+                </h3>
+                <p className="text-gray-400 text-sm">
+                  Interactive visualization of your music organized by genre.
+                  Zoom from coarse categories (Rock, Electronic) down to fine-grained subgenres.
+                  Node sizes reflect how many of your songs belong to each genre.
+                </p>
+              </div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => onNavigate('session')}
+            className="bg-[#141414] hover:bg-[#1a1a1a] border border-white/10 hover:border-[#1DB954]/50 rounded-2xl p-6 text-left transition-all group"
+          >
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-xl bg-[#1DB954]/20 flex items-center justify-center flex-shrink-0 group-hover:bg-[#1DB954]/30 transition-colors">
+                <Play className="w-6 h-6 text-[#1DB954]" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold mb-2 group-hover:text-[#1DB954] transition-colors">
+                  Session Path
+                </h3>
+                <p className="text-gray-400 text-sm">
+                  Trace your recent listening sessions as a journey through time.
+                  See how your taste flows from track to track.
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+
+        {/* Footer */}
+        <div className="mt-12 pt-8 border-t border-white/10 text-center text-gray-500 text-sm">
+          <p>Your data stays local. We never upload your listening history.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function SetupScreen() {
   const [copied, setCopied] = useState(false);
@@ -168,9 +284,15 @@ export default function App() {
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [trackCount, setTrackCount] = useState<{ count: number; last_synced: string | null } | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('search');
+  const [activeTab, setActiveTab] = useState<TabId>(getInitialTab);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Persist tab changes
+  const handleTabChange = (tab: TabId) => {
+    setActiveTab(tab);
+    localStorage.setItem('playlist-voyager-tab', tab);
+  };
 
   // Check config and auth status on mount
   useEffect(() => {
@@ -338,18 +460,21 @@ export default function App() {
       {/* Header */}
       <header className="bg-[#0a0a0a] border-b border-white/5 sticky top-0 z-50">
         <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center justify-between">
-          {/* Logo */}
-          <div className="flex items-center gap-2">
+          {/* Logo - clickable to go home */}
+          <button
+            onClick={() => handleTabChange('splash')}
+            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+          >
             <img src="/logo_mini.png" alt="Playlist Voyager" className="h-9" />
             <img src="/logo_text.png" alt="Playlist Voyager" className="h-6 hidden sm:block" />
-          </div>
+          </button>
 
           {/* Navigation Tabs */}
           <nav className="flex gap-1">
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
-                onClick={() => setActiveTab(id)}
+                onClick={() => handleTabChange(id)}
                 className={`nav-tab px-4 py-2 rounded-lg flex items-center gap-2 transition-colors ${
                   activeTab === id
                     ? 'bg-white/10 text-white active'
@@ -451,6 +576,7 @@ export default function App() {
         ) : (
           // Tab content
           <div className="h-full">
+            {activeTab === 'splash' && <SplashScreen onNavigate={handleTabChange} />}
             {activeTab === 'search' && <TemporalSearch />}
             {activeTab === 'graph' && <StyleGraph />}
             {activeTab === 'session' && <SessionPath />}

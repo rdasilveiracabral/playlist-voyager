@@ -41,18 +41,18 @@ export function StyleGraph() {
           style: {
             'background-color': 'data(color)',
             'label': 'data(label)',
-            'width': 'mapData(count, 0, 1000, 60, 150)',
-            'height': 'mapData(count, 0, 1000, 60, 150)',
-            'font-size': '14px',
+            'width': 'mapData(count, 0, 5000, 80, 200)',
+            'height': 'mapData(count, 0, 5000, 80, 200)',
+            'font-size': '16px',
             'font-weight': 'bold',
             'color': '#ffffff',
             'text-valign': 'center',
             'text-halign': 'center',
             'text-wrap': 'wrap',
-            'text-max-width': '100px',
+            'text-max-width': '120px',
             'border-width': 3,
             'border-color': '#ffffff',
-            'border-opacity': 0.3,
+            'border-opacity': 0.4,
             'text-outline-color': '#000000',
             'text-outline-width': 2,
           },
@@ -62,11 +62,11 @@ export function StyleGraph() {
           selector: 'node[type="genre"]',
           style: {
             'background-color': 'data(color)',
-            'background-opacity': 0.7,
+            'background-opacity': 0.8,
             'label': 'data(label)',
-            'width': 'mapData(count, 1, 100, 20, 50)',
-            'height': 'mapData(count, 1, 100, 20, 50)',
-            'font-size': '10px',
+            'width': 'mapData(count, 1, 600, 15, 60)',
+            'height': 'mapData(count, 1, 600, 15, 60)',
+            'font-size': '9px',
             'color': '#ffffff',
             'text-valign': 'bottom',
             'text-margin-y': 5,
@@ -85,13 +85,33 @@ export function StyleGraph() {
             'border-color': '#ffffff',
           },
         },
-        // Edges
+        // Parent edges (genre -> super-genre)
         {
-          selector: 'edge',
+          selector: 'edge[type="parent"]',
           style: {
             'width': 1,
-            'line-color': '#333333',
+            'line-color': '#555555',
             'opacity': 0.3,
+            'curve-style': 'bezier',
+          },
+        },
+        // Co-occurrence edges (genre <-> genre, same artist)
+        {
+          selector: 'edge[type="cooccurrence"]',
+          style: {
+            'width': 'mapData(weight, 2, 20, 1, 3)',
+            'line-color': '#666666',
+            'opacity': 'mapData(weight, 2, 20, 0.3, 0.6)',
+            'curve-style': 'bezier',
+          },
+        },
+        // Bridge edges (super-genre <-> super-genre)
+        {
+          selector: 'edge[type="bridge"]',
+          style: {
+            'width': 'mapData(weight, 3, 50, 2, 6)',
+            'line-color': '#777777',
+            'opacity': 'mapData(weight, 3, 50, 0.4, 0.7)',
             'curve-style': 'bezier',
           },
         },
@@ -100,8 +120,8 @@ export function StyleGraph() {
           selector: 'edge.highlighted',
           style: {
             'line-color': '#1DB954',
-            'opacity': 0.8,
-            'width': 2,
+            'opacity': 0.9,
+            'width': 3,
           },
         },
       ],
@@ -110,7 +130,7 @@ export function StyleGraph() {
         idealEdgeLength: 150,
         nodeOverlap: 20,
         refresh: 20,
-        fit: true,
+        fit: false,
         padding: 50,
         randomize: false,
         componentSpacing: 100,
@@ -126,6 +146,12 @@ export function StyleGraph() {
       minZoom: 0.3,
       maxZoom: 3,
       wheelSensitivity: 0.3,
+      zoom: 1.5,
+    });
+
+    // Center after layout completes
+    cy.on('layoutstop', () => {
+      cy.center();
     });
 
     cyRef.current = cy;
@@ -244,6 +270,13 @@ export function StyleGraph() {
           <span className="text-gray-600 mx-2">|</span>
           <span className="text-gray-400">Tracks: </span>
           <span className="text-white font-semibold">{graphData.stats.total_tracks}</span>
+          {graphData.stats.genre_connections !== undefined && (
+            <>
+              <span className="text-gray-600 mx-2">|</span>
+              <span className="text-[#1DB954]">{graphData.stats.genre_connections}</span>
+              <span className="text-gray-400"> connections</span>
+            </>
+          )}
         </div>
 
         {/* Zoom indicator */}

@@ -93,6 +93,8 @@ export interface GraphEdge {
     id: string;
     source: string;
     target: string;
+    type?: 'parent' | 'cooccurrence' | 'bridge';
+    weight?: number;
   };
 }
 
@@ -102,6 +104,8 @@ export interface GraphData {
   stats: {
     total_genres: number;
     total_tracks: number;
+    genre_connections?: number;
+    super_genre_bridges?: number;
   };
 }
 
