@@ -338,7 +338,7 @@ export default function App() {
 
   // Main app
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex flex-col">
+    <div className="h-screen bg-[#0a0a0a] flex flex-col overflow-hidden">
       {/* Header */}
       <header className="bg-[#0a0a0a] border-b border-white/5 sticky top-0 z-50">
         <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center justify-between">
