@@ -1,0 +1,43 @@
+# Playlist Voyager - Development Guidelines
+
+## Project Overview
+A visual explorer for Spotify Liked Songs libraries with temporal search, style graph visualization, and audio feature analysis.
+
+## Tech Stack
+- Backend: Python 3.11+, FastAPI, Spotipy
+- Frontend: React 18+, TypeScript, Vite, Cytoscape.js, TailwindCSS
+- Data: In-memory with JSON file caching (no database)
+
+## Key Conventions
+
+### Backend
+- Use async functions for all API endpoints
+- Store data in `store.py` (in-memory with JSON persistence)
+- Keep Spotify API calls in `spotify_client.py`
+- Configurable LLM prompts go in `llm_prompts.py`
+
+### Frontend
+- Components in `src/components/`
+- API client functions in `src/lib/api.ts`
+- Use Lucide icons
+- Dark theme with Spotify green (#1DB954) accent
+
+### Code Style
+- Python: Follow PEP 8, use type hints
+- TypeScript: Strict mode, prefer interfaces over types
+- CSS: Use Tailwind utilities, custom styles in index.css
+
+## Journal
+**Keep a development journal in `/journal/` folder.**
+- Create dated entries (YYYY-MM-DD.md) for significant changes
+- Document what was implemented, decisions made, and next steps
+- Reference this journal when resuming work
+
+## File Structure
+```
+├── backend/           # FastAPI backend
+├── frontend/          # React frontend
+├── journal/           # Development journal entries
+├── data/              # Cached data (gitignored)
+└── README.md
+```
