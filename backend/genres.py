@@ -296,9 +296,17 @@ async def get_graph_data():
 
     # Super-genre nodes (large, colored)
     super_genre_counts = {}
+    super_genre_samples: dict[str, list] = {}
     for genre, data in genre_data.items():
         sg = data["super_genre"]
         super_genre_counts[sg] = super_genre_counts.get(sg, 0) + data["count"]
+        # Collect sample tracks for super-genre
+        if sg not in super_genre_samples:
+            super_genre_samples[sg] = []
+        if len(super_genre_samples[sg]) < 10:
+            for track in data["sample_tracks"]:
+                if len(super_genre_samples[sg]) < 10:
+                    super_genre_samples[sg].append(track)
 
     for super_genre, count in super_genre_counts.items():
         if count > 0:
@@ -309,12 +317,14 @@ async def get_graph_data():
                     "type": "super_genre",
                     "color": GENRE_COLORS.get(super_genre, "#9E9E9E"),
                     "count": count,
+                    "sample_tracks": super_genre_samples.get(super_genre, []),
                 }
             })
 
     # Genre nodes (smaller, connected to super-genre)
+    # Skip fine genres that exactly match their super-genre name
     for genre, data in genre_data.items():
-        if data["count"] > 0:
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
             nodes.append({
                 "data": {
                     "id": f"genre_{genre}",
@@ -331,8 +341,9 @@ async def get_graph_data():
     edges = []
 
     # 1. Genre -> super-genre edges (parent relationship)
+    # Skip edges for fine genres that exactly match their super-genre
     for genre, data in genre_data.items():
-        if data["count"] > 0:
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
             edges.append({
                 "data": {
                     "id": f"edge_{genre}_{data['super_genre']}",
@@ -344,8 +355,14 @@ async def get_graph_data():
 
     # 2. Genre <-> genre edges (co-occurrence on same artist)
     # Only include edges with weight >= 2 to reduce clutter
+    # Also skip edges involving genres that were filtered out (matching super-genre name)
     for (g1, g2), weight in genre_cooccurrence.items():
         if weight >= 2:
+            # Skip if either genre was filtered out
+            g1_super = genre_data[g1]["super_genre"]
+            g2_super = genre_data[g2]["super_genre"]
+            if g1.lower() == g1_super.lower() or g2.lower() == g2_super.lower():
+                continue
             edges.append({
                 "data": {
                     "id": f"edge_cooccur_{g1}_{g2}",
@@ -476,9 +493,17 @@ async def get_temporal_graph_data():
     nodes = []
 
     super_genre_counts = {}
+    super_genre_samples: dict[str, list] = {}
     for genre, data in genre_data.items():
         sg = data["super_genre"]
         super_genre_counts[sg] = super_genre_counts.get(sg, 0) + data["count"]
+        # Collect sample tracks for super-genre
+        if sg not in super_genre_samples:
+            super_genre_samples[sg] = []
+        if len(super_genre_samples[sg]) < 10:
+            for track in data["sample_tracks"]:
+                if len(super_genre_samples[sg]) < 10:
+                    super_genre_samples[sg].append(track)
 
     for super_genre, count in super_genre_counts.items():
         if count > 0:
@@ -489,11 +514,13 @@ async def get_temporal_graph_data():
                     "type": "super_genre",
                     "color": GENRE_COLORS.get(super_genre, "#9E9E9E"),
                     "count": count,
+                    "sample_tracks": super_genre_samples.get(super_genre, []),
                 }
             })
 
+    # Skip fine genres that exactly match their super-genre name
     for genre, data in genre_data.items():
-        if data["count"] > 0:
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
             nodes.append({
                 "data": {
                     "id": f"genre_{genre}",
@@ -510,8 +537,9 @@ async def get_temporal_graph_data():
     edges = []
 
     # Parent edges (genre -> super-genre)
+    # Skip edges for fine genres that exactly match their super-genre
     for genre, data in genre_data.items():
-        if data["count"] > 0:
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
             edges.append({
                 "data": {
                     "id": f"edge_{genre}_{data['super_genre']}",
@@ -523,12 +551,18 @@ async def get_temporal_graph_data():
 
     # Temporal genre affinity edges
     # Normalize weights and filter low ones
+    # Also skip edges involving genres that were filtered out (matching super-genre name)
     if temporal_affinity:
         max_weight = max(temporal_affinity.values())
         min_threshold = max_weight * 0.05  # Only show top 95% of connections
 
         for (g1, g2), weight in temporal_affinity.items():
             if weight >= min_threshold:
+                # Skip if either genre was filtered out
+                g1_super = genre_data[g1]["super_genre"]
+                g2_super = genre_data[g2]["super_genre"]
+                if g1.lower() == g1_super.lower() or g2.lower() == g2_super.lower():
+                    continue
                 normalized_weight = (weight / max_weight) * 20  # Scale to 0-20
                 edges.append({
                     "data": {
@@ -564,6 +598,231 @@ async def get_temporal_graph_data():
         "stats": {
             "total_genres": len(genre_data),
             "total_tracks": len(sorted_tracks),
+            "genre_connections": len([e for e in edges if e["data"].get("type") == "temporal"]),
+            "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "temporal_bridge"]),
+        },
+    }
+
+
+@router.get("/graph-data/play-history")
+async def get_play_history_graph_data():
+    """Get graph data with edges based on actual listening sessions.
+
+    Uses recent play history to build genre connections based on what
+    genres the user actually listens to in sequence during sessions.
+    Gaussian weighting - adjacent plays count most, distant plays count less.
+    """
+    all_tracks = store.get_all_tracks()
+    tracks_by_id = {t.id: t for t in all_tracks}
+    artists = {a.id: a for a in store.get_all_artists()}
+
+    # Get recent plays (up to 500)
+    recent_plays = store.get_recent_plays(500)
+
+    if not recent_plays:
+        # Return empty graph if no play history
+        return {
+            "nodes": [],
+            "edges": [],
+            "stats": {
+                "total_genres": 0,
+                "total_tracks": 0,
+                "genre_connections": 0,
+                "super_genre_bridges": 0,
+            },
+        }
+
+    # Build track -> genres mapping for played tracks
+    track_genres: dict[str, set[str]] = {}
+    for play in recent_plays:
+        track = tracks_by_id.get(play["track_id"])
+        if not track:
+            continue
+        genres = set()
+        for artist_id in track.artist_ids:
+            artist = artists.get(artist_id)
+            if artist:
+                genres.update(artist.genres)
+        if not genres:
+            genres = {"unknown"}
+        track_genres[play["track_id"]] = genres
+
+    # Count tracks per genre and collect sample tracks from play history
+    genre_data = {}
+    for play in recent_plays:
+        if play["track_id"] not in track_genres:
+            continue
+        track = tracks_by_id.get(play["track_id"])
+        if not track:
+            continue
+        for genre in track_genres[play["track_id"]]:
+            if genre not in genre_data:
+                genre_data[genre] = {
+                    "count": 0,
+                    "super_genre": get_super_genre([genre]),
+                    "sample_tracks": [],
+                }
+            genre_data[genre]["count"] += 1
+            if len(genre_data[genre]["sample_tracks"]) < 10:
+                # Avoid duplicate sample tracks
+                existing_ids = [t["id"] for t in genre_data[genre]["sample_tracks"]]
+                if track.id not in existing_ids:
+                    genre_data[genre]["sample_tracks"].append({
+                        "id": track.id,
+                        "name": track.name,
+                        "artists": track.artist_names,
+                        "album_image": track.album_image_url,
+                        "spotify_url": track.spotify_url,
+                    })
+
+    # Build temporal genre affinity from play sequence with Gaussian weighting
+    window_size = 10  # Look at 10 plays before and after
+    play_affinity: dict[tuple[str, str], float] = {}
+    play_super_affinity: dict[tuple[str, str], float] = {}
+
+    for i, play in enumerate(recent_plays):
+        if play["track_id"] not in track_genres:
+            continue
+        play_g = track_genres[play["track_id"]]
+
+        # Look at neighbors in play history
+        for offset in range(-window_size, window_size + 1):
+            if offset == 0:
+                continue  # Skip self
+
+            neighbor_idx = i + offset
+            if 0 <= neighbor_idx < len(recent_plays):
+                neighbor_play = recent_plays[neighbor_idx]
+                if neighbor_play["track_id"] not in track_genres:
+                    continue
+                neighbor_g = track_genres[neighbor_play["track_id"]]
+
+                # Gaussian weight based on distance
+                weight = gaussian_weight(abs(offset), sigma=5.0)
+
+                # Add weighted affinity between all genre pairs
+                for g1 in play_g:
+                    for g2 in neighbor_g:
+                        if g1 != g2 and g1 in genre_data and g2 in genre_data:
+                            key = tuple(sorted([g1, g2]))
+                            play_affinity[key] = play_affinity.get(key, 0) + weight
+
+                # Super-genre affinity
+                sg1_set = set(get_super_genre([g]) for g in play_g)
+                sg2_set = set(get_super_genre([g]) for g in neighbor_g)
+                for sg1 in sg1_set:
+                    for sg2 in sg2_set:
+                        if sg1 != sg2:
+                            key = tuple(sorted([sg1, sg2]))
+                            play_super_affinity[key] = play_super_affinity.get(key, 0) + weight
+
+    # Build Cytoscape nodes
+    nodes = []
+
+    super_genre_counts = {}
+    super_genre_samples: dict[str, list] = {}
+    for genre, data in genre_data.items():
+        sg = data["super_genre"]
+        super_genre_counts[sg] = super_genre_counts.get(sg, 0) + data["count"]
+        # Collect sample tracks for super-genre
+        if sg not in super_genre_samples:
+            super_genre_samples[sg] = []
+        if len(super_genre_samples[sg]) < 10:
+            for track in data["sample_tracks"]:
+                if len(super_genre_samples[sg]) < 10:
+                    super_genre_samples[sg].append(track)
+
+    for super_genre, count in super_genre_counts.items():
+        if count > 0:
+            nodes.append({
+                "data": {
+                    "id": f"super_{super_genre}",
+                    "label": super_genre.replace("-", " ").title(),
+                    "type": "super_genre",
+                    "color": GENRE_COLORS.get(super_genre, "#9E9E9E"),
+                    "count": count,
+                    "sample_tracks": super_genre_samples.get(super_genre, []),
+                }
+            })
+
+    # Skip fine genres that exactly match their super-genre name
+    for genre, data in genre_data.items():
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
+            nodes.append({
+                "data": {
+                    "id": f"genre_{genre}",
+                    "label": genre,
+                    "type": "genre",
+                    "parent_id": f"super_{data['super_genre']}",
+                    "color": GENRE_COLORS.get(data["super_genre"], "#9E9E9E"),
+                    "count": data["count"],
+                    "sample_tracks": data["sample_tracks"],
+                }
+            })
+
+    # Build edges
+    edges = []
+
+    # Parent edges (genre -> super-genre)
+    for genre, data in genre_data.items():
+        if data["count"] > 0 and genre.lower() != data["super_genre"].lower():
+            edges.append({
+                "data": {
+                    "id": f"edge_{genre}_{data['super_genre']}",
+                    "source": f"genre_{genre}",
+                    "target": f"super_{data['super_genre']}",
+                    "type": "parent",
+                }
+            })
+
+    # Play history genre affinity edges
+    # Also skip edges involving genres that were filtered out (matching super-genre name)
+    if play_affinity:
+        max_weight = max(play_affinity.values())
+        min_threshold = max_weight * 0.05
+
+        for (g1, g2), weight in play_affinity.items():
+            if weight >= min_threshold:
+                # Skip if either genre was filtered out
+                g1_super = genre_data[g1]["super_genre"]
+                g2_super = genre_data[g2]["super_genre"]
+                if g1.lower() == g1_super.lower() or g2.lower() == g2_super.lower():
+                    continue
+                normalized_weight = (weight / max_weight) * 20
+                edges.append({
+                    "data": {
+                        "id": f"edge_play_{g1}_{g2}",
+                        "source": f"genre_{g1}",
+                        "target": f"genre_{g2}",
+                        "type": "temporal",  # Reuse same styling
+                        "weight": round(normalized_weight, 2),
+                    }
+                })
+
+    # Play history super-genre affinity edges
+    if play_super_affinity:
+        max_sg_weight = max(play_super_affinity.values())
+        min_sg_threshold = max_sg_weight * 0.1
+
+        for (sg1, sg2), weight in play_super_affinity.items():
+            if weight >= min_sg_threshold:
+                normalized_weight = (weight / max_sg_weight) * 50
+                edges.append({
+                    "data": {
+                        "id": f"edge_play_super_{sg1}_{sg2}",
+                        "source": f"super_{sg1}",
+                        "target": f"super_{sg2}",
+                        "type": "temporal_bridge",  # Reuse same styling
+                        "weight": round(normalized_weight, 2),
+                    }
+                })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_genres": len(genre_data),
+            "total_tracks": len(recent_plays),
             "genre_connections": len([e for e in edges if e["data"].get("type") == "temporal"]),
             "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "temporal_bridge"]),
         },

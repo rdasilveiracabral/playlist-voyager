@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import type { Core, NodeSingular } from 'cytoscape';
-import { ZoomIn, ZoomOut, Maximize2, Info, GitBranch, Clock } from 'lucide-react';
-import { getGraphData, getTemporalGraphData, type GraphData, type GraphNode } from '../lib/api';
+import { ZoomIn, ZoomOut, Maximize2, Info, GitBranch, Clock, ListMusic } from 'lucide-react';
+import { getGraphData, getTemporalGraphData, getPlayHistoryGraphData, type GraphData, type GraphNode } from '../lib/api';
 
-type ViewMode = 'artist' | 'temporal';
+type ViewMode = 'artist' | 'playlist' | 'temporal';
 
 export function StyleGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -22,9 +22,14 @@ export function StyleGraph() {
     const loadData = async () => {
       setLoading(true);
       try {
-        const data = viewMode === 'artist'
-          ? await getGraphData()
-          : await getTemporalGraphData();
+        let data: GraphData;
+        if (viewMode === 'artist') {
+          data = await getGraphData();
+        } else if (viewMode === 'playlist') {
+          data = await getTemporalGraphData();
+        } else {
+          data = await getPlayHistoryGraphData();
+        }
         setGraphData(data);
         setSelectedNode(null);
       } catch (err) {
@@ -409,9 +414,22 @@ export function StyleGraph() {
                   ? 'bg-[#1DB954] text-black font-semibold'
                   : 'text-gray-400 hover:text-white hover:bg-white/10'
               }`}
+              title="Genres connected by shared artists"
             >
               <GitBranch className="w-3.5 h-3.5" />
-              Artist Affinity
+              Artist
+            </button>
+            <button
+              onClick={() => setViewMode('playlist')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors ${
+                viewMode === 'playlist'
+                  ? 'bg-[#1DB954] text-black font-semibold'
+                  : 'text-gray-400 hover:text-white hover:bg-white/10'
+              }`}
+              title="Genres saved around the same time"
+            >
+              <ListMusic className="w-3.5 h-3.5" />
+              Playlist
             </button>
             <button
               onClick={() => setViewMode('temporal')}
@@ -420,9 +438,10 @@ export function StyleGraph() {
                   ? 'bg-[#1DB954] text-black font-semibold'
                   : 'text-gray-400 hover:text-white hover:bg-white/10'
               }`}
+              title="Genres played together in sessions"
             >
               <Clock className="w-3.5 h-3.5" />
-              Temporal Affinity
+              Temporal
             </button>
           </div>
 
