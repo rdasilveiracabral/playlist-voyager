@@ -13,6 +13,18 @@
   <img src="https://img.shields.io/badge/react-18+-61dafb" alt="React">
 </p>
 
+## The Problem
+
+If you're like me, your Spotify Liked Songs playlist has grown into a massive collection over the years—mine has **7,000+ songs**. I use it on shuffle to find and settle on a mood for the day, since my taste is pretty eclectic.
+
+But here's the thing: **my song-saving pattern is bursty**. When I discover a new style or artist, I tend to save multiple songs in quick succession. This means my Liked Songs are *temporally consistent*—songs saved around the same time often share a vibe.
+
+**The frustration?** When I find a song I love and want to hear what I saved around it, Spotify won't cooperate. With 7,000 songs, the playlist is too large to navigate—disabling shuffle doesn't help because Spotify seemingly can't load the full list. Creating a "radio" from a song gets close, but it pulls from all of Spotify, not *my* library.
+
+I wanted something simple: **search for a song, see the 5 songs I saved before and after it**. And while we're at it, why not visualize the entire library by style? See the genres as a graph, zoom from broad categories (Rock, Electronic, Classical) down to specific subgenres (Dark Progressive House, Shoegaze, Baroque).
+
+That's Playlist Voyager.
+
 ## Features
 
 ### Temporal Search
@@ -23,9 +35,6 @@ Interactive visualization of your music organized by genre. Zoom from coarse cat
 
 ### Session Path
 Trace your recent listening sessions as a journey through time. See how your taste flows from track to track.
-
-### Audio Features
-Explore your library through Spotify's audio characteristics: energy, danceability, valence (happiness), acousticness, and more. Each track appears as a point (or album cover) on a 2D scatter plot.
 
 ## Quick Start
 
