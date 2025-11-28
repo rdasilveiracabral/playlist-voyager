@@ -92,9 +92,9 @@ body {
   opacity: 1;
 }
 
-/* Cytoscape container styling */
+/* Cytoscape container styling - Spotify green glow */
 .cytoscape-container {
-  background: radial-gradient(circle at center, #1a1a2e 0%, #0a0a0a 70%);
+  background: radial-gradient(circle at center, #0d1f12 0%, #0a0a0a 60%);
 }
 
 /* Pulse animation for sync progress */

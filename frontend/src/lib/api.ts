@@ -177,3 +177,4 @@ export const getTracksBySuperGenre = (superGenre: string) =>
 export const classifyMissingGenres = () =>
   fetchJson<{ classified: number; remaining: number }>('/genres/classify-missing', { method: 'POST' });
 export const getGraphData = () => fetchJson<GraphData>('/genres/graph-data');
+export const getTemporalGraphData = () => fetchJson<GraphData>('/genres/graph-data/temporal');

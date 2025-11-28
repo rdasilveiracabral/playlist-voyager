@@ -380,3 +380,191 @@ async def get_graph_data():
             "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "bridge"]),
         },
     }
+
+
+def gaussian_weight(distance: int, sigma: float = 5.0) -> float:
+    """Compute Gaussian weight for temporal distance. distance=0 means adjacent track."""
+    import math
+    return math.exp(-(distance ** 2) / (2 * sigma ** 2))
+
+
+@router.get("/graph-data/temporal")
+async def get_temporal_graph_data():
+    """Get graph data with edges based on temporal proximity of saved tracks.
+
+    For each track, we look at the 10 tracks saved before and after it.
+    Genres that appear together temporally get weighted connections,
+    with a Gaussian falloff - adjacent tracks count most, distant tracks count less.
+    """
+    tracks = store.get_all_tracks()
+    artists = {a.id: a for a in store.get_all_artists()}
+
+    # Sort tracks by added_at date
+    sorted_tracks = sorted(tracks, key=lambda t: t.added_at)
+
+    # Build track -> genres mapping
+    track_genres: dict[str, set[str]] = {}
+    for track in sorted_tracks:
+        genres = set()
+        for artist_id in track.artist_ids:
+            artist = artists.get(artist_id)
+            if artist:
+                genres.update(artist.genres)
+        if not genres:
+            genres = {"unknown"}
+        track_genres[track.id] = genres
+
+    # Count tracks per genre and collect sample tracks (same as original)
+    genre_data = {}
+    for track in sorted_tracks:
+        for genre in track_genres[track.id]:
+            if genre not in genre_data:
+                genre_data[genre] = {
+                    "count": 0,
+                    "super_genre": get_super_genre([genre]),
+                    "sample_tracks": [],
+                }
+            genre_data[genre]["count"] += 1
+            if len(genre_data[genre]["sample_tracks"]) < 10:
+                genre_data[genre]["sample_tracks"].append({
+                    "id": track.id,
+                    "name": track.name,
+                    "artists": track.artist_names,
+                    "album_image": track.album_image_url,
+                    "spotify_url": track.spotify_url,
+                })
+
+    # Build temporal genre affinity with Gaussian weighting
+    # For each track, look at neighbors within window and weight genre co-occurrences
+    window_size = 10  # Look at 10 tracks before and after
+    temporal_affinity: dict[tuple[str, str], float] = {}
+    temporal_super_affinity: dict[tuple[str, str], float] = {}
+
+    for i, track in enumerate(sorted_tracks):
+        track_g = track_genres[track.id]
+
+        # Look at neighbors (before and after)
+        for offset in range(-window_size, window_size + 1):
+            if offset == 0:
+                continue  # Skip self
+
+            neighbor_idx = i + offset
+            if 0 <= neighbor_idx < len(sorted_tracks):
+                neighbor = sorted_tracks[neighbor_idx]
+                neighbor_g = track_genres[neighbor.id]
+
+                # Gaussian weight based on distance
+                weight = gaussian_weight(abs(offset), sigma=5.0)
+
+                # Add weighted affinity between all genre pairs
+                for g1 in track_g:
+                    for g2 in neighbor_g:
+                        if g1 != g2 and g1 in genre_data and g2 in genre_data:
+                            key = tuple(sorted([g1, g2]))
+                            temporal_affinity[key] = temporal_affinity.get(key, 0) + weight
+
+                # Super-genre affinity
+                sg1_set = set(get_super_genre([g]) for g in track_g)
+                sg2_set = set(get_super_genre([g]) for g in neighbor_g)
+                for sg1 in sg1_set:
+                    for sg2 in sg2_set:
+                        if sg1 != sg2:
+                            key = tuple(sorted([sg1, sg2]))
+                            temporal_super_affinity[key] = temporal_super_affinity.get(key, 0) + weight
+
+    # Build Cytoscape nodes (same structure as original)
+    nodes = []
+
+    super_genre_counts = {}
+    for genre, data in genre_data.items():
+        sg = data["super_genre"]
+        super_genre_counts[sg] = super_genre_counts.get(sg, 0) + data["count"]
+
+    for super_genre, count in super_genre_counts.items():
+        if count > 0:
+            nodes.append({
+                "data": {
+                    "id": f"super_{super_genre}",
+                    "label": super_genre.replace("-", " ").title(),
+                    "type": "super_genre",
+                    "color": GENRE_COLORS.get(super_genre, "#9E9E9E"),
+                    "count": count,
+                }
+            })
+
+    for genre, data in genre_data.items():
+        if data["count"] > 0:
+            nodes.append({
+                "data": {
+                    "id": f"genre_{genre}",
+                    "label": genre,
+                    "type": "genre",
+                    "parent_id": f"super_{data['super_genre']}",
+                    "color": GENRE_COLORS.get(data["super_genre"], "#9E9E9E"),
+                    "count": data["count"],
+                    "sample_tracks": data["sample_tracks"],
+                }
+            })
+
+    # Build edges based on temporal affinity
+    edges = []
+
+    # Parent edges (genre -> super-genre)
+    for genre, data in genre_data.items():
+        if data["count"] > 0:
+            edges.append({
+                "data": {
+                    "id": f"edge_{genre}_{data['super_genre']}",
+                    "source": f"genre_{genre}",
+                    "target": f"super_{data['super_genre']}",
+                    "type": "parent",
+                }
+            })
+
+    # Temporal genre affinity edges
+    # Normalize weights and filter low ones
+    if temporal_affinity:
+        max_weight = max(temporal_affinity.values())
+        min_threshold = max_weight * 0.05  # Only show top 95% of connections
+
+        for (g1, g2), weight in temporal_affinity.items():
+            if weight >= min_threshold:
+                normalized_weight = (weight / max_weight) * 20  # Scale to 0-20
+                edges.append({
+                    "data": {
+                        "id": f"edge_temporal_{g1}_{g2}",
+                        "source": f"genre_{g1}",
+                        "target": f"genre_{g2}",
+                        "type": "temporal",
+                        "weight": round(normalized_weight, 2),
+                    }
+                })
+
+    # Temporal super-genre affinity edges
+    if temporal_super_affinity:
+        max_sg_weight = max(temporal_super_affinity.values())
+        min_sg_threshold = max_sg_weight * 0.1
+
+        for (sg1, sg2), weight in temporal_super_affinity.items():
+            if weight >= min_sg_threshold:
+                normalized_weight = (weight / max_sg_weight) * 50  # Scale to 0-50
+                edges.append({
+                    "data": {
+                        "id": f"edge_temporal_super_{sg1}_{sg2}",
+                        "source": f"super_{sg1}",
+                        "target": f"super_{sg2}",
+                        "type": "temporal_bridge",
+                        "weight": round(normalized_weight, 2),
+                    }
+                })
+
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total_genres": len(genre_data),
+            "total_tracks": len(sorted_tracks),
+            "genre_connections": len([e for e in edges if e["data"].get("type") == "temporal"]),
+            "super_genre_bridges": len([e for e in edges if e["data"].get("type") == "temporal_bridge"]),
+        },
+    }

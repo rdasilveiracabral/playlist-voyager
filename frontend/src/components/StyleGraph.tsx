@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import cytoscape from 'cytoscape';
 import type { Core, NodeSingular } from 'cytoscape';
-import { ZoomIn, ZoomOut, Maximize2, Info } from 'lucide-react';
-import { getGraphData, type GraphData, type GraphNode } from '../lib/api';
+import { ZoomIn, ZoomOut, Maximize2, Info, GitBranch, Clock } from 'lucide-react';
+import { getGraphData, getTemporalGraphData, type GraphData, type GraphNode } from '../lib/api';
+
+type ViewMode = 'artist' | 'temporal';
 
 export function StyleGraph() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -11,13 +13,20 @@ export function StyleGraph() {
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState<GraphNode['data'] | null>(null);
   const [zoomLevel, setZoomLevel] = useState(1);
+  const [viewMode, setViewMode] = useState<ViewMode>('artist');
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; label: string; count: number } | null>(null);
+  const [connectedGenres, setConnectedGenres] = useState<{ id: string; label: string; color: string; count: number }[]>([]);
 
-  // Load graph data
+  // Load graph data based on view mode
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true);
       try {
-        const data = await getGraphData();
+        const data = viewMode === 'artist'
+          ? await getGraphData()
+          : await getTemporalGraphData();
         setGraphData(data);
+        setSelectedNode(null);
       } catch (err) {
         console.error('Failed to load graph data:', err);
       } finally {
@@ -25,7 +34,7 @@ export function StyleGraph() {
       }
     };
     loadData();
-  }, []);
+  }, [viewMode]);
 
   // Initialize Cytoscape
   useEffect(() => {
@@ -85,6 +94,22 @@ export function StyleGraph() {
             'border-color': '#ffffff',
           },
         },
+        // Highlighted nodes (connected to hovered node)
+        {
+          selector: 'node.highlighted',
+          style: {
+            'border-width': 3,
+            'border-color': '#1DB954',
+            'background-opacity': 1,
+          },
+        },
+        // Dimmed nodes (not connected to hovered node)
+        {
+          selector: 'node.dimmed',
+          style: {
+            'opacity': 0.2,
+          },
+        },
         // Parent edges (genre -> super-genre)
         {
           selector: 'edge[type="parent"]',
@@ -115,6 +140,26 @@ export function StyleGraph() {
             'curve-style': 'bezier',
           },
         },
+        // Temporal edges (genre <-> genre based on save time proximity)
+        {
+          selector: 'edge[type="temporal"]',
+          style: {
+            'width': 'mapData(weight, 0, 20, 1, 4)',
+            'line-color': '#666666',
+            'opacity': 'mapData(weight, 0, 20, 0.2, 0.6)',
+            'curve-style': 'bezier',
+          },
+        },
+        // Temporal bridge edges (super-genre <-> super-genre)
+        {
+          selector: 'edge[type="temporal_bridge"]',
+          style: {
+            'width': 'mapData(weight, 0, 50, 2, 8)',
+            'line-color': '#777777',
+            'opacity': 'mapData(weight, 0, 50, 0.3, 0.7)',
+            'curve-style': 'bezier',
+          },
+        },
         // Highlighted edges
         {
           selector: 'edge.highlighted',
@@ -122,6 +167,13 @@ export function StyleGraph() {
             'line-color': '#1DB954',
             'opacity': 0.9,
             'width': 3,
+          },
+        },
+        // Dimmed edges
+        {
+          selector: 'edge.dimmed',
+          style: {
+            'opacity': 0.05,
           },
         },
       ],
@@ -156,26 +208,75 @@ export function StyleGraph() {
 
     cyRef.current = cy;
 
-    // Event handlers
-    cy.on('tap', 'node', (evt) => {
+    // Event handlers - use function refs to avoid stale closure
+    const handleNodeTap = (evt: cytoscape.EventObject) => {
       const node = evt.target as NodeSingular;
-      setSelectedNode(node.data());
-    });
+      const data = node.data();
+      console.log('Node clicked:', data);
+      setSelectedNode({ ...data });
 
-    cy.on('tap', (evt) => {
+      // Get connected genres (excluding parent edges for genre nodes)
+      const connectedEdges = node.connectedEdges().filter((edge) => {
+        const edgeType = edge.data('type');
+        return edgeType !== 'parent';
+      });
+      const connectedNodes = connectedEdges.connectedNodes().filter((n) => n.id() !== node.id());
+      const connected = connectedNodes.map((n) => ({
+        id: n.id(),
+        label: n.data('label'),
+        color: n.data('color'),
+        count: n.data('count'),
+      }));
+      // Sort by count descending
+      connected.sort((a, b) => b.count - a.count);
+      setConnectedGenres(connected);
+    };
+
+    const handleBackgroundTap = (evt: cytoscape.EventObject) => {
       if (evt.target === cy) {
         setSelectedNode(null);
+        setConnectedGenres([]);
       }
-    });
+    };
 
-    cy.on('mouseover', 'node[type="genre"]', (evt) => {
+    cy.on('tap', 'node', handleNodeTap);
+    cy.on('tap', handleBackgroundTap);
+
+    // Hover handlers for highlighting and tooltip
+    cy.on('mouseover', 'node', (evt) => {
       const node = evt.target as NodeSingular;
       node.addClass('hover');
+
+      // Show tooltip
+      const data = node.data();
+      const pos = node.renderedPosition();
+      setTooltip({
+        x: pos.x,
+        y: pos.y - 40,
+        label: data.label,
+        count: data.count,
+      });
+
+      // Highlight connected nodes and edges
+      const connectedEdges = node.connectedEdges();
+      const connectedNodes = connectedEdges.connectedNodes();
+
+      // Dim all, then highlight connected
+      cy.elements().addClass('dimmed');
+      node.removeClass('dimmed').addClass('highlighted');
+      connectedNodes.removeClass('dimmed').addClass('highlighted');
+      connectedEdges.removeClass('dimmed').addClass('highlighted');
     });
 
-    cy.on('mouseout', 'node[type="genre"]', (evt) => {
+    cy.on('mouseout', 'node', (evt) => {
       const node = evt.target as NodeSingular;
       node.removeClass('hover');
+
+      // Hide tooltip
+      setTooltip(null);
+
+      // Remove all highlighting
+      cy.elements().removeClass('dimmed highlighted');
     });
 
     cy.on('zoom', () => {
@@ -208,6 +309,40 @@ export function StyleGraph() {
 
   const handleFit = useCallback(() => {
     cyRef.current?.fit(undefined, 50);
+  }, []);
+
+  // Navigate to a connected genre
+  const navigateToGenre = useCallback((genreId: string) => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    const node = cy.getElementById(genreId);
+    if (node.length > 0) {
+      // Trigger the tap event programmatically
+      const data = node.data();
+      setSelectedNode({ ...data });
+
+      // Get connected genres
+      const connectedEdges = node.connectedEdges().filter((edge) => {
+        const edgeType = edge.data('type');
+        return edgeType !== 'parent';
+      });
+      const connectedNodes = connectedEdges.connectedNodes().filter((n) => n.id() !== genreId);
+      const connected = connectedNodes.map((n) => ({
+        id: n.id(),
+        label: n.data('label'),
+        color: n.data('color'),
+        count: n.data('count'),
+      }));
+      connected.sort((a, b) => b.count - a.count);
+      setConnectedGenres(connected);
+
+      // Center on the node
+      cy.animate({
+        center: { eles: node },
+        duration: 300,
+      });
+    }
   }, []);
 
   if (loading) {
@@ -263,21 +398,61 @@ export function StyleGraph() {
           </button>
         </div>
 
-        {/* Stats */}
-        <div className="absolute top-4 left-4 bg-[#1a1a1a]/80 backdrop-blur rounded-lg px-3 py-2 text-sm">
-          <span className="text-gray-400">Genres: </span>
-          <span className="text-white font-semibold">{graphData.stats.total_genres}</span>
-          <span className="text-gray-600 mx-2">|</span>
-          <span className="text-gray-400">Tracks: </span>
-          <span className="text-white font-semibold">{graphData.stats.total_tracks}</span>
-          {graphData.stats.genre_connections !== undefined && (
-            <>
-              <span className="text-gray-600 mx-2">|</span>
-              <span className="text-[#1DB954]">{graphData.stats.genre_connections}</span>
-              <span className="text-gray-400"> connections</span>
-            </>
-          )}
+        {/* Stats & View Toggle */}
+        <div className="absolute top-4 left-4 flex flex-col gap-2 items-start">
+          {/* View Toggle */}
+          <div className="bg-[#1a1a1a]/90 backdrop-blur rounded-lg p-1 inline-flex gap-1">
+            <button
+              onClick={() => setViewMode('artist')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors ${
+                viewMode === 'artist'
+                  ? 'bg-[#1DB954] text-black font-semibold'
+                  : 'text-gray-400 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              Artist Affinity
+            </button>
+            <button
+              onClick={() => setViewMode('temporal')}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors ${
+                viewMode === 'temporal'
+                  ? 'bg-[#1DB954] text-black font-semibold'
+                  : 'text-gray-400 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              Temporal Affinity
+            </button>
+          </div>
+
+          {/* Stats */}
+          <div className="bg-[#1a1a1a]/80 backdrop-blur rounded-lg px-3 py-2 text-sm">
+            <span className="text-gray-400">Genres: </span>
+            <span className="text-white font-semibold">{graphData.stats.total_genres}</span>
+            <span className="text-gray-600 mx-2">|</span>
+            <span className="text-gray-400">Tracks: </span>
+            <span className="text-white font-semibold">{graphData.stats.total_tracks}</span>
+            {graphData.stats.genre_connections !== undefined && (
+              <>
+                <span className="text-gray-600 mx-2">|</span>
+                <span className="text-[#1DB954]">{graphData.stats.genre_connections}</span>
+                <span className="text-gray-400"> connections</span>
+              </>
+            )}
+          </div>
         </div>
+
+        {/* Tooltip */}
+        {tooltip && (
+          <div
+            className="absolute pointer-events-none bg-[#1a1a1a]/95 backdrop-blur border border-white/10 rounded-lg px-3 py-2 text-sm z-50 transform -translate-x-1/2"
+            style={{ left: tooltip.x, top: tooltip.y }}
+          >
+            <p className="font-semibold text-white">{tooltip.label}</p>
+            <p className="text-[#1DB954]">{tooltip.count.toLocaleString()} tracks</p>
+          </div>
+        )}
 
         {/* Zoom indicator */}
         <div className="absolute top-4 right-4 bg-[#1a1a1a]/80 backdrop-blur rounded-lg px-3 py-2 text-sm">
@@ -287,48 +462,77 @@ export function StyleGraph() {
       </div>
 
       {/* Detail Panel */}
-      {selectedNode && (
+      {selectedNode ? (
         <div className="w-80 bg-[#141414] border-l border-white/5 overflow-y-auto">
           <div className="p-4">
             {/* Header */}
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-2 mb-2">
               <div
-                className="w-4 h-4 rounded-full"
+                className="w-3 h-3 rounded-full flex-shrink-0"
                 style={{ backgroundColor: selectedNode.color }}
               />
-              <h3 className="text-xl font-bold">{selectedNode.label}</h3>
+              <h3 className="text-lg font-bold truncate">{selectedNode.label}</h3>
             </div>
 
             {/* Count */}
-            <p className="text-gray-400 mb-4">
-              <span className="text-2xl font-bold text-white">{selectedNode.count}</span> tracks
+            <p className="text-gray-400 text-sm mb-4">
+              <span className="text-xl font-bold text-white">{selectedNode.count.toLocaleString()}</span> tracks
             </p>
 
-            {/* Sample Tracks */}
+            {/* Connected Genres */}
+            {connectedGenres.length > 0 && (
+              <div className="mb-4">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Connected ({connectedGenres.length})
+                </h4>
+                <div className="flex flex-wrap gap-1.5">
+                  {connectedGenres.slice(0, 12).map((genre) => (
+                    <button
+                      key={genre.id}
+                      onClick={() => navigateToGenre(genre.id)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-white/5 hover:bg-white/10 transition-colors"
+                    >
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: genre.color }}
+                      />
+                      <span className="truncate max-w-[100px]">{genre.label}</span>
+                    </button>
+                  ))}
+                  {connectedGenres.length > 12 && (
+                    <span className="px-2 py-1 text-xs text-gray-500">
+                      +{connectedGenres.length - 12} more
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tracks */}
             {selectedNode.sample_tracks && selectedNode.sample_tracks.length > 0 && (
               <div>
-                <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                  Sample Tracks
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Tracks
                 </h4>
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {selectedNode.sample_tracks.map((track) => (
                     <a
                       key={track.id}
                       href={track.spotify_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-colors"
+                      className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/5 transition-colors group"
                     >
                       {track.album_image && (
                         <img
                           src={track.album_image}
                           alt=""
-                          className="w-10 h-10 rounded"
+                          className="w-8 h-8 rounded flex-shrink-0"
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium truncate">{track.name}</p>
-                        <p className="text-xs text-gray-400 truncate">
+                        <p className="text-xs font-medium truncate group-hover:text-[#1DB954]">{track.name}</p>
+                        <p className="text-[10px] text-gray-500 truncate">
                           {track.artists.join(', ')}
                         </p>
                       </div>
@@ -338,6 +542,10 @@ export function StyleGraph() {
               </div>
             )}
           </div>
+        </div>
+      ) : (
+        <div className="w-80 bg-[#141414] border-l border-white/5 flex items-center justify-center">
+          <p className="text-gray-500 text-sm text-center px-4">Click a node to see details</p>
         </div>
       )}
     </div>
