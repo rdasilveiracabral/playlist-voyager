@@ -1,19 +1,17 @@
 import { useState, useEffect } from 'react';
-import { Clock, GitBranch, Activity, Play, LogOut, RefreshCw, Music, Settings, ExternalLink, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
+import { Clock, GitBranch, Play, LogOut, RefreshCw, Music, Settings, ExternalLink, AlertCircle, CheckCircle2, Copy } from 'lucide-react';
 import { getAuthStatus, getTrackCount, startSync, getSyncStatus, getLoginUrl, logout, getConfigStatus, type AuthStatus, type SyncStatus, type ConfigStatus } from './lib/api';
 import { TemporalSearch } from './components/TemporalSearch';
 import { StyleGraph } from './components/StyleGraph';
 import { SessionPath } from './components/SessionPath';
-import { AudioFeatures } from './components/AudioFeatures';
 import './index.css';
 
-type TabId = 'search' | 'graph' | 'session' | 'features';
+type TabId = 'search' | 'graph' | 'session';
 
 const TABS: { id: TabId; label: string; icon: typeof Clock }[] = [
   { id: 'search', label: 'Temporal Search', icon: Clock },
   { id: 'graph', label: 'Style Graph', icon: GitBranch },
   { id: 'session', label: 'Session Path', icon: Play },
-  { id: 'features', label: 'Audio Features', icon: Activity },
 ];
 
 function SetupScreen() {
@@ -456,7 +454,6 @@ export default function App() {
             {activeTab === 'search' && <TemporalSearch />}
             {activeTab === 'graph' && <StyleGraph />}
             {activeTab === 'session' && <SessionPath />}
-            {activeTab === 'features' && <AudioFeatures />}
           </div>
         )}
       </main>
