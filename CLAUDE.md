@@ -28,11 +28,13 @@ A visual explorer for Spotify Liked Songs libraries with temporal search, style 
 - CSS: Use Tailwind utilities, custom styles in index.css
 
 ## Development Journal
-**Keep a development journal in `/journal/` folder.**
-- Create dated entries (YYYY-MM-DD.md) for significant changes
-- Document what was implemented, decisions made, and next steps
-- Reference this journal when resuming work
-- Log all user prompts and major implementation decisions
+**MANDATORY: Keep a development journal in `/journal/` folder.**
+- Create dated entries (YYYY-MM-DD.md) for each session
+- **Update the journal proactively** - don't wait to be asked
+- After every significant change (feature, bug fix, refactor), add an entry
+- Before ending a session or committing, ensure journal is current
+- Document: what was implemented, user prompts, decisions made, git commits
+- Reference this journal when resuming work after a crash or new session
 
 ## File Structure
 ```
