@@ -195,10 +195,6 @@ Edit `backend/llm_prompts.py` to customize how unknown artists are classified:
 - `GET /genres/tracks-by-genre/{genre}` - Get tracks for a genre
 - `POST /genres/classify-missing` - Run LLM classification
 
-## Contributing
-
-Contributions welcome! Please feel free to submit a Pull Request.
-
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
@@ -207,3 +203,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - Genre taxonomy inspired by [Every Noise at Once](https://everynoise.com/) by Glenn McDonald
 - Built with the [Spotify Web API](https://developer.spotify.com/documentation/web-api)
+- Logos generated with [nano banana](https://gemini.google.com) and made transparent with [Pixelcut](https://www.pixelcut.ai)
