@@ -153,12 +153,12 @@ function HourlyPatternChart({ hourlyPattern }: { hourlyPattern: number[] }) {
   const maxCount = Math.max(...hourlyPattern, 1);
 
   return (
-    <div className="bg-[#1a1a1a] rounded-lg p-3">
+    <div className="bg-[#1a1a1a] rounded-lg p-3 h-full w-full flex flex-col">
       <div className="flex items-center gap-2 mb-2">
         <BarChart3 className="w-4 h-4 text-[#1DB954]" />
-        <span className="text-sm font-semibold">Daily Pattern</span>
+        <span className="text-sm font-semibold">Hourly Pattern</span>
       </div>
-      <div className="flex items-end gap-0.5 h-16">
+      <div className="flex items-end gap-0.5 flex-1 min-h-0">
         {hourlyPattern.map((count, hour) => (
           <div
             key={hour}
@@ -407,6 +407,13 @@ function ListeningTimeline({ plays, selectedDate }: { plays: AllPlay[]; selected
   );
 }
 
+// Zoom threshold for showing sub-genres vs super-genres only
+const ZOOM_THRESHOLD = 1.0;
+
+// Spotify green shades - brighter for super-genres, darker for sub-genres
+const SPOTIFY_GREEN_BRIGHT = '#1DB954';
+const SPOTIFY_GREEN_DARK = '#147a38';
+
 // ============ MiniGenreGraph ============
 function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -415,6 +422,7 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
   const [fullGraphData, setFullGraphData] = useState<GraphData | null>(null);
   const [activeEdges, setActiveEdges] = useState<ActiveEdges | null>(null);
   const [loading, setLoading] = useState(true);
+  const [zoomLevel, setZoomLevel] = useState<'low' | 'high'>('low');
 
   // Load full graph data once on mount
   useEffect(() => {
@@ -465,6 +473,7 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
       container: containerRef.current,
       elements: [...fullGraphData.nodes, ...fullGraphData.edges],
       style: [
+        // === SUPER-GENRE NODES ===
         {
           selector: 'node[type="super_genre"]',
           style: {
@@ -492,10 +501,12 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
           selector: 'node[type="super_genre"].active',
           style: {
             'background-opacity': 1,
-            'border-opacity': 0.5,
+            'border-color': SPOTIFY_GREEN_BRIGHT,
+            'border-opacity': 0.8,
             'text-opacity': 1,
           },
         },
+        // === SUB-GENRE NODES ===
         {
           selector: 'node[type="genre"]',
           style: {
@@ -513,13 +524,29 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
             'text-outline-width': 1,
           },
         },
+        // Hidden at low zoom
         {
-          selector: 'node[type="genre"].active',
+          selector: 'node[type="genre"].zoom-low',
+          style: {
+            opacity: 0,
+            'events': 'no',
+          },
+        },
+        // Visible at high zoom
+        {
+          selector: 'node[type="genre"].zoom-high',
+          style: {
+            opacity: 1,
+            'events': 'yes',
+          },
+        },
+        {
+          selector: 'node[type="genre"].active.zoom-high',
           style: {
             'background-opacity': 1,
             'text-opacity': 1,
             'border-width': 2,
-            'border-color': '#1DB954',
+            'border-color': SPOTIFY_GREEN_DARK,
           },
         },
         {
@@ -528,9 +555,10 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
             'text-opacity': 1,
             'background-opacity': 1,
             'border-width': 2,
-            'border-color': '#1DB954',
+            'border-color': SPOTIFY_GREEN_BRIGHT,
           },
         },
+        // === PARENT EDGES (genre to super-genre) ===
         {
           selector: 'edge[type="parent"]',
           style: {
@@ -540,14 +568,22 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
             'curve-style': 'bezier',
           },
         },
+        // Hidden at low zoom
         {
-          selector: 'edge[type="parent"].active',
+          selector: 'edge[type="parent"].zoom-low',
           style: {
-            'line-color': '#1DB954',
-            opacity: 0.6,
+            opacity: 0,
+          },
+        },
+        {
+          selector: 'edge[type="parent"].active.zoom-high',
+          style: {
+            'line-color': SPOTIFY_GREEN_DARK,
+            opacity: 0.7,
             width: 2,
           },
         },
+        // === TEMPORAL EDGES (sub-genre to sub-genre) ===
         {
           selector: 'edge[type="temporal"]',
           style: {
@@ -557,14 +593,22 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
             'curve-style': 'bezier',
           },
         },
+        // Hidden at low zoom
         {
-          selector: 'edge[type="temporal"].active',
+          selector: 'edge[type="temporal"].zoom-low',
           style: {
-            'line-color': '#1DB954',
+            opacity: 0,
+          },
+        },
+        {
+          selector: 'edge[type="temporal"].active.zoom-high',
+          style: {
+            'line-color': SPOTIFY_GREEN_DARK,
             opacity: 0.9,
             width: 3,
           },
         },
+        // === TEMPORAL BRIDGE EDGES (super-genre to super-genre) ===
         {
           selector: 'edge[type="temporal_bridge"]',
           style: {
@@ -577,7 +621,7 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
         {
           selector: 'edge[type="temporal_bridge"].active',
           style: {
-            'line-color': '#1DB954',
+            'line-color': SPOTIFY_GREEN_BRIGHT,
             opacity: 0.9,
             width: 4,
           },
@@ -626,6 +670,36 @@ function MiniGenreGraph({ selectedDate }: { selectedDate: string }) {
       const node = evt.target as NodeSingular;
       node.removeClass('hover');
     });
+
+    // Zoom handler - update zoom-based classes
+    const updateZoomClasses = () => {
+      const currentZoom = cy.zoom();
+      const isHighZoom = currentZoom >= ZOOM_THRESHOLD;
+      const newZoomLevel = isHighZoom ? 'high' : 'low';
+
+      // Update state if changed
+      setZoomLevel(newZoomLevel);
+
+      // Update classes on sub-genre nodes and their edges
+      const genreNodes = cy.nodes('[type="genre"]');
+      const parentEdges = cy.edges('[type="parent"]');
+      const temporalEdges = cy.edges('[type="temporal"]');
+
+      if (isHighZoom) {
+        genreNodes.removeClass('zoom-low').addClass('zoom-high');
+        parentEdges.removeClass('zoom-low').addClass('zoom-high');
+        temporalEdges.removeClass('zoom-low').addClass('zoom-high');
+      } else {
+        genreNodes.removeClass('zoom-high').addClass('zoom-low');
+        parentEdges.removeClass('zoom-high').addClass('zoom-low');
+        temporalEdges.removeClass('zoom-high').addClass('zoom-low');
+      }
+    };
+
+    cy.on('zoom', updateZoomClasses);
+
+    // Initial zoom class setup
+    updateZoomClasses();
 
     return () => {
       cy.destroy();
@@ -876,7 +950,7 @@ export function SessionPath() {
       {hasData ? (
         <>
           {/* Top row: Calendar + Hourly Pattern */}
-          <div className="p-4 border-b border-white/5 flex gap-4">
+          <div className="p-4 border-b border-white/5 flex gap-4 items-stretch">
             <div className="flex-shrink-0">
               <CalendarWidget
                 dailyCounts={stats.daily_counts}
@@ -884,7 +958,7 @@ export function SessionPath() {
                 onSelectDate={setSelectedDate}
               />
             </div>
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 flex">
               <HourlyPatternChart hourlyPattern={stats.hourly_pattern} />
             </div>
           </div>
