@@ -1,10 +1,17 @@
-# Playlist Voyager
+<p align="center">
+  <img src="logo_big.png" alt="Playlist Voyager" width="400">
+</p>
 
-A visual explorer for your Spotify Liked Songs library. Discover patterns in your music taste through temporal relationships and style clustering.
+<p align="center">
+  A visual explorer for your Spotify Liked Songs library.<br>
+  Discover patterns in your music taste through temporal relationships and style clustering.
+</p>
 
-![License](https://img.shields.io/badge/license-MIT-green)
-![Python](https://img.shields.io/badge/python-3.11+-blue)
-![React](https://img.shields.io/badge/react-18+-61dafb)
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
+  <img src="https://img.shields.io/badge/python-3.11+-blue" alt="Python">
+  <img src="https://img.shields.io/badge/react-18+-61dafb" alt="React">
+</p>
 
 ## Features
 

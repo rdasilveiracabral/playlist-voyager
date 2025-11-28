@@ -32,11 +32,10 @@ function SetupScreen() {
         {/* Logo */}
         <div className="text-center mb-8">
           <img
-            src="/logo.png"
+            src="/logo_big.png"
             alt="Playlist Voyager"
-            className="w-32 h-32 mx-auto mb-4 rounded-2xl shadow-2xl"
+            className="w-64 mx-auto mb-4"
           />
-          <h1 className="text-4xl font-bold mb-2">Playlist Voyager</h1>
           <p className="text-gray-400">
             Explore your music library through time and style
           </p>
@@ -295,11 +294,10 @@ export default function App() {
           {/* Logo */}
           <div className="text-center mb-8">
             <img
-              src="/logo.png"
+              src="/logo_big.png"
               alt="Playlist Voyager"
-              className="w-32 h-32 mx-auto mb-4 rounded-2xl shadow-2xl"
+              className="w-64 mx-auto mb-4"
             />
-            <h1 className="text-4xl font-bold mb-2">Playlist Voyager</h1>
             <p className="text-gray-400">
               Explore your music library through time and style
             </p>
@@ -343,9 +341,9 @@ export default function App() {
       <header className="bg-[#0a0a0a] border-b border-white/5 sticky top-0 z-50">
         <div className="max-w-[1800px] mx-auto px-4 py-3 flex items-center justify-between">
           {/* Logo */}
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Playlist Voyager" className="w-10 h-10 rounded-lg" />
-            <span className="font-bold text-lg hidden sm:block">Playlist Voyager</span>
+          <div className="flex items-center gap-2">
+            <img src="/logo_mini.png" alt="Playlist Voyager" className="h-9" />
+            <img src="/logo_text.png" alt="Playlist Voyager" className="h-6 hidden sm:block" />
           </div>
 
           {/* Navigation Tabs */}
